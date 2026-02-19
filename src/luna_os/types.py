@@ -11,6 +11,7 @@ from typing import Any
 
 class TaskStatus(StrEnum):
     """Possible states for a task."""
+
     QUEUED = "queued"
     RUNNING = "running"
     DONE = "done"
@@ -21,6 +22,7 @@ class TaskStatus(StrEnum):
 
 class PlanStatus(StrEnum):
     """Possible states for a plan."""
+
     DRAFT = "draft"
     ACTIVE = "active"
     PAUSED = "paused"
@@ -30,6 +32,7 @@ class PlanStatus(StrEnum):
 
 class StepStatus(StrEnum):
     """Possible states for a plan step."""
+
     PENDING = "pending"
     RUNNING = "running"
     DONE = "done"
@@ -39,6 +42,7 @@ class StepStatus(StrEnum):
 
 class Priority(StrEnum):
     """Task priority levels (lower value = higher priority)."""
+
     CRITICAL = "critical"
     HIGH = "high"
     NORMAL = "normal"
@@ -65,6 +69,7 @@ PRIORITY_ICONS: dict[str, str] = {
 @dataclass
 class Task:
     """Represents a single task in the system."""
+
     id: str
     description: str
     status: TaskStatus = TaskStatus.QUEUED
@@ -118,6 +123,7 @@ class Task:
 @dataclass
 class Step:
     """Represents a single step within a plan."""
+
     plan_id: str
     step_num: int
     title: str
@@ -153,6 +159,7 @@ class Step:
 @dataclass
 class Plan:
     """Represents a multi-step plan."""
+
     id: str
     chat_id: str
     goal: str
@@ -183,15 +190,14 @@ class Plan:
             with contextlib.suppress(ValueError):
                 filtered["status"] = PlanStatus(filtered["status"])
         plan = cls(**filtered)
-        plan.steps = [
-            Step.from_dict(s) if isinstance(s, dict) else s for s in steps_raw
-        ]
+        plan.steps = [Step.from_dict(s) if isinstance(s, dict) else s for s in steps_raw]
         return plan
 
 
 @dataclass
 class Event:
     """Represents an event in the event queue."""
+
     id: int | None = None
     event_type: str = ""
     task_id: str | None = None

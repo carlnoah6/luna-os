@@ -272,9 +272,7 @@ def render_png(html_content: str, output_path: str) -> str:
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(args=["--no-sandbox"])
-            page = browser.new_page(
-                viewport={"width": 1100, "height": 600}, device_scale_factor=2
-            )
+            page = browser.new_page(viewport={"width": 1100, "height": 600}, device_scale_factor=2)
             page.goto(f"file://{html_file}")
             page.wait_for_timeout(300)
             dims = page.evaluate(

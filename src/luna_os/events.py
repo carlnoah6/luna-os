@@ -87,9 +87,7 @@ class ContractHelper:
         )
 
 
-def resolve_plan_for_task(
-    store: StorageBackend, task_id: str
-) -> tuple[str | None, int | None]:
+def resolve_plan_for_task(store: StorageBackend, task_id: str) -> tuple[str | None, int | None]:
     """Find plan_id and step_num for a given task_id by scanning active plans."""
     plans = store.list_plans(status="active")
     for p in plans:

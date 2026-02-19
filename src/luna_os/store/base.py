@@ -112,9 +112,7 @@ class StorageBackend(ABC):
         """Return a plan (with steps populated) or *None*."""
 
     @abstractmethod
-    def get_plan_by_chat(
-        self, chat_id: str, status_filter: str | None = None
-    ) -> Plan | None:
+    def get_plan_by_chat(self, chat_id: str, status_filter: str | None = None) -> Plan | None:
         """Find the most recent plan for a chat, optionally filtered by status."""
 
     @abstractmethod

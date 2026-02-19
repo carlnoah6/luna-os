@@ -151,16 +151,15 @@ class TaskManager:
             raise ValueError("Dependency cycle detected")
 
         task = self.store.add_task(
-            task_id, description, source_chat=source_chat,
-            priority=priority, depends_on=depends_on,
+            task_id,
+            description,
+            source_chat=source_chat,
+            priority=priority,
+            depends_on=depends_on,
         )
 
         # Create chat if needed
-        if (
-            create_chat
-            and not _is_routine_task(description)
-            and self.notifications
-        ):
+        if create_chat and not _is_routine_task(description) and self.notifications:
             running = self.store.active_tasks()
             if len(running) < self.max_concurrent:
                 try:
@@ -192,9 +191,7 @@ class TaskManager:
         """Mark a task as running."""
         running = self.store.active_tasks()
         if len(running) >= self.max_concurrent:
-            raise RuntimeError(
-                f"Queue full: {len(running)}/{self.max_concurrent}"
-            )
+            raise RuntimeError(f"Queue full: {len(running)}/{self.max_concurrent}")
         self.store.start_task(task_id, session_key)
         return self.store.get_task(task_id)  # type: ignore[return-value]
 
@@ -273,7 +270,11 @@ class TaskManager:
         """Quick overview of task counts."""
         tasks = self.store.list_tasks()
         counts: dict[str, int] = {
-            "queued": 0, "running": 0, "done": 0, "failed": 0, "cancelled": 0,
+            "queued": 0,
+            "running": 0,
+            "done": 0,
+            "failed": 0,
+            "cancelled": 0,
         }
         for t in tasks:
             s = t.status.value if hasattr(t.status, "value") else str(t.status)
@@ -312,16 +313,20 @@ class TaskManager:
                     f"Auto-failed: stuck for {elapsed:.0f} minutes "
                     f"(timeout={HEALTH_CHECK_TIMEOUT_MINUTES}min)",
                 )
-                result["stuck_failed"].append({
-                    "id": t.id,
-                    "description": t.description[:80],
-                    "elapsed_min": round(elapsed, 1),
-                })
+                result["stuck_failed"].append(
+                    {
+                        "id": t.id,
+                        "description": t.description[:80],
+                        "elapsed_min": round(elapsed, 1),
+                    }
+                )
             else:
-                result["active"].append({
-                    "id": t.id,
-                    "elapsed_min": round(elapsed, 1),
-                })
+                result["active"].append(
+                    {
+                        "id": t.id,
+                        "elapsed_min": round(elapsed, 1),
+                    }
+                )
 
         return result
 
@@ -375,9 +380,7 @@ class TaskManager:
                 waited_at = datetime.fromisoformat(waited_at)
             if waited_at.tzinfo is None:
                 waited_at = waited_at.replace(tzinfo=UTC)
-            waited_minutes = (
-                datetime.now(UTC) - waited_at
-            ).total_seconds() / 60
+            waited_minutes = (datetime.now(UTC) - waited_at).total_seconds() / 60
 
         self.store.update_task(
             task_id,

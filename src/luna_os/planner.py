@@ -30,9 +30,7 @@ STALE_HOURS = 24
 # -- Formatting helpers --------------------------------------------------------
 
 
-def _format_duration(
-    start: datetime | str | None, end: datetime | str | None = None
-) -> str:
+def _format_duration(start: datetime | str | None, end: datetime | str | None = None) -> str:
     """Format duration between two timestamps as a human-readable string."""
     if not start:
         return ""
@@ -253,9 +251,7 @@ class Planner:
 
     # -- Spawn helpers ---------------------------------------------------------
 
-    def _build_spawn_prompt(
-        self, plan: Plan, step: Step, task_chat_id: str = ""
-    ) -> str:
+    def _build_spawn_prompt(self, plan: Plan, step: Step, task_chat_id: str = "") -> str:
         """Build the prompt for spawning a subagent for a step."""
         prompt_text = step.prompt or step.title or ""
         goal = plan.goal or ""
@@ -264,7 +260,8 @@ class Planner:
         task_id = step.task_id or ""
 
         completed = [
-            s for s in plan.steps
+            s
+            for s in plan.steps
             if (s.status.value if hasattr(s.status, "value") else str(s.status)) == "done"
         ]
         context_lines = []
@@ -288,7 +285,7 @@ Report progress at each key milestone.
 {goal}
 
 ## Current Step
-**Step {step_num}: {step.title or ''}**
+**Step {step_num}: {step.title or ""}**
 {prompt_text}
 
 ## Context from Completed Steps
@@ -305,9 +302,7 @@ On failure, emit: step.failed with task-id={task_id}
 Report results to: {chat_id}
 """
 
-    def _start_ready_steps(
-        self, plan: Plan, ready_steps: list[Step]
-    ) -> list[tuple[int, bool]]:
+    def _start_ready_steps(self, plan: Plan, ready_steps: list[Step]) -> list[tuple[int, bool]]:
         """Start ready steps up to the concurrency limit.
 
         Returns list of ``(step_num, spawn_ok)`` tuples.
@@ -372,9 +367,7 @@ Report results to: {chat_id}
         """
         existing = self.store.get_plan_by_chat(chat_id, status_filter="active")
         if existing:
-            raise ValueError(
-                f"Active plan already exists: {existing.id} ({existing.goal})"
-            )
+            raise ValueError(f"Active plan already exists: {existing.id} ({existing.goal})")
 
         steps = [normalize_step(s) for s in steps_raw]
         if not steps:
@@ -472,10 +465,7 @@ Report results to: {chat_id}
         else:
             plan = self.store.get_plan(plan.id)  # type: ignore[assignment]
             if plan:
-                still_running = [
-                    s for s in plan.steps
-                    if s.status.value == "running"
-                ]
+                still_running = [s for s in plan.steps if s.status.value == "running"]
                 if still_running:
                     self._notify(plan.chat_id, format_plan(plan))
                     self._send_plan_graph(plan)
@@ -548,10 +538,7 @@ Report results to: {chat_id}
             next_num = max((s.step_num for s in plan.steps), default=0) + 1
             kept_count = len(plan.steps)
         else:
-            kept = [
-                s for s in plan.steps
-                if s.status.value in ("done", "running", "failed")
-            ]
+            kept = [s for s in plan.steps if s.status.value in ("done", "running", "failed")]
             next_num = max((s.step_num for s in kept), default=0) + 1
             kept_count = len(kept)
             self.store.delete_pending_steps(plan.id)
@@ -559,9 +546,7 @@ Report results to: {chat_id}
         for i, ns in enumerate(new_steps):
             raw_deps = ns.get("depends_on") or []
             deps = [d + next_num for d in raw_deps]
-            self.store.insert_step(
-                plan.id, next_num + i, ns["title"], ns["prompt"], deps
-            )
+            self.store.insert_step(plan.id, next_num + i, ns["title"], ns["prompt"], deps)
 
         # Auto-advance if plan is active
         spawn_ok = False
@@ -569,9 +554,7 @@ Report results to: {chat_id}
         if original_status == "active":
             plan = self.store.get_plan(plan.id)  # type: ignore[assignment]
             if plan:
-                has_running = any(
-                    s.status.value == "running" for s in plan.steps
-                )
+                has_running = any(s.status.value == "running" for s in plan.steps)
                 if not has_running:
                     first_pending = self.store.next_pending_step(plan.id)
                     if first_pending:
@@ -581,7 +564,9 @@ Report results to: {chat_id}
                             f"Step {first_pending.step_num}: {first_pending.title}"
                         )
                         self.store.add_task(
-                            task_id, desc, source_chat=plan.chat_id,
+                            task_id,
+                            desc,
+                            source_chat=plan.chat_id,
                         )
                         self.store.start_task(task_id, "cron-pending")
                         self.store.start_step(plan.id, first_pending.step_num, task_id)
@@ -666,9 +651,7 @@ Report results to: {chat_id}
                 if task.status.value == "done":
                     return self.step_done(chat_id, current.step_num, task.result or "")
                 elif task.status.value == "failed":
-                    return self.step_fail(
-                        chat_id, current.step_num, task.result or "unknown error"
-                    )
+                    return self.step_fail(chat_id, current.step_num, task.result or "unknown error")
 
         return {
             "advance": False,
@@ -756,10 +739,7 @@ Report results to: {chat_id}
                     self.store.update_plan_status(d.id, "cancelled")
                     full = self.store.get_plan(d.id)
                     if full:
-                        msg = (
-                            "Draft plan timed out "
-                            f"(30 min without confirmation)\n\n{full.goal}"
-                        )
+                        msg = f"Draft plan timed out (30 min without confirmation)\n\n{full.goal}"
                         self._notify(full.chat_id, msg)
                     expired_drafts += 1
 
@@ -797,9 +777,7 @@ Report results to: {chat_id}
                 if isinstance(last_activity, datetime):
                     if last_activity.tzinfo is None:
                         last_activity = last_activity.replace(tzinfo=UTC)
-                    stale_hours = (
-                        datetime.now(UTC) - last_activity
-                    ).total_seconds() / 3600
+                    stale_hours = (datetime.now(UTC) - last_activity).total_seconds() / 3600
                     if stale_hours > STALE_HOURS:
                         fresh = self.store.get_plan(p.id)
                         if fresh and fresh.status.value == "active":
@@ -888,10 +866,12 @@ Report results to: {chat_id}
         """List all plans."""
         plans = self.store.list_plans()
         order = {"active": 0, "draft": 0, "paused": 1, "completed": 2, "cancelled": 3}
-        plans.sort(key=lambda p: (
-            order.get(p.status.value if hasattr(p.status, "value") else str(p.status), 9),
-            str(p.created_at or ""),
-        ))
+        plans.sort(
+            key=lambda p: (
+                order.get(p.status.value if hasattr(p.status, "value") else str(p.status), 9),
+                str(p.created_at or ""),
+            )
+        )
         result = []
         for p in plans:
             full = self.store.get_plan(p.id)
@@ -900,14 +880,16 @@ Report results to: {chat_id}
             done = sum(1 for s in full.steps if s.status.value == "done")
             total = len(full.steps)
             running = [s for s in full.steps if s.status.value == "running"]
-            result.append({
-                "id": p.id,
-                "goal": p.goal,
-                "status": p.status.value if hasattr(p.status, "value") else str(p.status),
-                "done": done,
-                "total": total,
-                "running_step": running[0].step_num if running else None,
-            })
+            result.append(
+                {
+                    "id": p.id,
+                    "goal": p.goal,
+                    "status": p.status.value if hasattr(p.status, "value") else str(p.status),
+                    "done": done,
+                    "total": total,
+                    "running_step": running[0].step_num if running else None,
+                }
+            )
         return result
 
     def find_by_task(self, task_id: str) -> dict[str, Any]:

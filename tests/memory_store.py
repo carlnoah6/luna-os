@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from luna_os.store.base import StorageBackend
@@ -67,7 +66,12 @@ class MemoryBackend(StorageBackend):
         tasks = list(self._tasks.values())
         if status:
             tasks = [t for t in tasks if t.status.value == status]
-        tasks.sort(key=lambda t: (t.priority_value, t.created_at or datetime.min.replace(tzinfo=timezone.utc)))
+        tasks.sort(
+            key=lambda t: (
+                t.priority_value,
+                t.created_at or datetime.min.replace(tzinfo=UTC),
+            )
+        )
         return tasks
 
     def update_task(self, task_id: str, **fields: Any) -> None:
@@ -114,21 +118,16 @@ class MemoryBackend(StorageBackend):
     def ready_tasks(self) -> list[Task]:
         queued = [t for t in self._tasks.values() if t.status == TaskStatus.QUEUED]
         done_ids = {t.id for t in self._tasks.values() if t.status == TaskStatus.DONE}
-        return [
-            t for t in queued
-            if all(d in done_ids for d in (t.depends_on or []))
-        ]
+        return [t for t in queued if all(d in done_ids for d in (t.depends_on or []))]
 
     def active_tasks(self) -> list[Task]:
-        return [
-            t for t in self._tasks.values()
-            if t.status == TaskStatus.RUNNING
-        ]
+        return [t for t in self._tasks.values() if t.status == TaskStatus.RUNNING]
 
     def cleanup_tasks(self, days: int = 7) -> int:
         cutoff = now_utc() - timedelta(days=days)
         to_remove = [
-            tid for tid, t in self._tasks.items()
+            tid
+            for tid, t in self._tasks.items()
             if t.status.value in ("done", "cancelled", "failed")
             and t.updated_at
             and t.updated_at < cutoff
@@ -167,9 +166,11 @@ class MemoryBackend(StorageBackend):
     def find_duplicate(self, description: str) -> str | None:
         desc_lower = description.strip().lower()
         for t in self._tasks.values():
-            if t.status.value in ("queued", "running"):
-                if t.description.strip().lower() == desc_lower:
-                    return t.id
+            if (
+                t.status.value in ("queued", "running")
+                and t.description.strip().lower() == desc_lower
+            ):
+                return t.id
         return None
 
     def task_count_by_status(self) -> dict[str, int]:
@@ -206,14 +207,16 @@ class MemoryBackend(StorageBackend):
         for i, s in enumerate(steps, 1):
             raw_deps = s.get("depends_on") or []
             deps = [d + 1 for d in raw_deps]
-            plan_steps.append(Step(
-                plan_id=plan_id,
-                step_num=i,
-                title=s.get("title", ""),
-                prompt=s.get("prompt", ""),
-                status=StepStatus.PENDING,
-                depends_on=deps,
-            ))
+            plan_steps.append(
+                Step(
+                    plan_id=plan_id,
+                    step_num=i,
+                    title=s.get("title", ""),
+                    prompt=s.get("prompt", ""),
+                    status=StepStatus.PENDING,
+                    depends_on=deps,
+                )
+            )
         plan = Plan(
             id=plan_id,
             chat_id=chat_id,
@@ -229,9 +232,7 @@ class MemoryBackend(StorageBackend):
     def get_plan(self, plan_id: str) -> Plan | None:
         return self._plans.get(plan_id)
 
-    def get_plan_by_chat(
-        self, chat_id: str, status_filter: str | None = None
-    ) -> Plan | None:
+    def get_plan_by_chat(self, chat_id: str, status_filter: str | None = None) -> Plan | None:
         candidates = []
         for p in self._plans.values():
             if p.chat_id == chat_id or p.id == chat_id:
@@ -242,14 +243,16 @@ class MemoryBackend(StorageBackend):
                     candidates.append(p)
         if not candidates:
             return None
-        candidates.sort(key=lambda p: p.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        candidates.sort(
+            key=lambda p: p.created_at or datetime.min.replace(tzinfo=UTC), reverse=True
+        )
         return candidates[0]
 
     def list_plans(self, status: str | None = None) -> list[Plan]:
         plans = list(self._plans.values())
         if status:
             plans = [p for p in plans if p.status.value == status]
-        plans.sort(key=lambda p: p.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        plans.sort(key=lambda p: p.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
         return plans
 
     def update_plan_status(self, plan_id: str, status: str) -> None:
@@ -329,9 +332,9 @@ class MemoryBackend(StorageBackend):
             return []
         done_nums = {s.step_num for s in plan.steps if s.status == StepStatus.DONE}
         return [
-            s for s in plan.steps
-            if s.status == StepStatus.PENDING
-            and all(d in done_nums for d in (s.depends_on or []))
+            s
+            for s in plan.steps
+            if s.status == StepStatus.PENDING and all(d in done_nums for d in (s.depends_on or []))
         ]
 
     def next_pending_step(self, plan_id: str) -> Step | None:
@@ -353,14 +356,16 @@ class MemoryBackend(StorageBackend):
     ) -> None:
         plan = self._plans.get(plan_id)
         if plan:
-            plan.steps.append(Step(
-                plan_id=plan_id,
-                step_num=step_num,
-                title=title,
-                prompt=prompt,
-                status=StepStatus.PENDING,
-                depends_on=depends_on or [],
-            ))
+            plan.steps.append(
+                Step(
+                    plan_id=plan_id,
+                    step_num=step_num,
+                    title=title,
+                    prompt=prompt,
+                    status=StepStatus.PENDING,
+                    depends_on=depends_on or [],
+                )
+            )
 
     # -- Events ----------------------------------------------------------------
 
@@ -373,16 +378,18 @@ class MemoryBackend(StorageBackend):
         payload: dict[str, Any] | None = None,
     ) -> None:
         self._event_seq += 1
-        self._events.append(Event(
-            id=self._event_seq,
-            event_type=event_type,
-            task_id=task_id,
-            plan_id=plan_id,
-            step_num=step_num,
-            payload=payload,
-            processed=False,
-            created_at=now_utc(),
-        ))
+        self._events.append(
+            Event(
+                id=self._event_seq,
+                event_type=event_type,
+                task_id=task_id,
+                plan_id=plan_id,
+                step_num=step_num,
+                payload=payload,
+                processed=False,
+                created_at=now_utc(),
+            )
+        )
 
     def poll_events(self, limit: int = 10) -> list[Event]:
         unprocessed = [e for e in self._events if not e.processed]

@@ -106,7 +106,7 @@ class TestTaskManagerLifecycle:
     def test_ready_and_active(self):
         tm, store = make_tm()
         t1 = tm.add("First")
-        t2 = tm.add("Second", depends_on=[t1.id])
+        tm.add("Second", depends_on=[t1.id])
         ready = tm.ready()
         assert len(ready) == 1
         assert ready[0]["id"] == t1.id

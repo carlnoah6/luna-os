@@ -58,7 +58,9 @@ class TestReadySteps:
     def test_no_deps_all_ready(self):
         store = MemoryBackend()
         store.create_plan(
-            "plan-1", "chat-1", "Goal",
+            "plan-1",
+            "chat-1",
+            "Goal",
             [
                 {"title": "A"},
                 {"title": "B"},
@@ -70,7 +72,9 @@ class TestReadySteps:
     def test_deps_block_until_done(self):
         store = MemoryBackend()
         store.create_plan(
-            "plan-1", "chat-1", "Goal",
+            "plan-1",
+            "chat-1",
+            "Goal",
             [
                 {"title": "A"},
                 {"title": "B", "depends_on": [0]},
@@ -90,7 +94,9 @@ class TestReadySteps:
         store = MemoryBackend()
         # A -> B, A -> C, B+C -> D
         store.create_plan(
-            "plan-1", "chat-1", "Goal",
+            "plan-1",
+            "chat-1",
+            "Goal",
             [
                 {"title": "A"},
                 {"title": "B", "depends_on": [0]},
@@ -126,10 +132,14 @@ class TestReadySteps:
 class TestPlannerInit:
     def test_init_creates_draft(self):
         planner, store = make_planner()
-        result = planner.init("chat-1", "Build it", [
-            {"title": "Design"},
-            {"title": "Build"},
-        ])
+        result = planner.init(
+            "chat-1",
+            "Build it",
+            [
+                {"title": "Design"},
+                {"title": "Build"},
+            ],
+        )
         assert result["status"] == "draft"
         assert result["steps"] == 2
         plan = store.get_plan(result["plan_id"])
@@ -169,10 +179,14 @@ class TestPlannerStart:
 class TestPlannerStepDone:
     def test_step_done_advances(self):
         planner, store = make_planner()
-        planner.init("chat-1", "Goal", [
-            {"title": "A"},
-            {"title": "B", "depends_on": [0]},
-        ])
+        planner.init(
+            "chat-1",
+            "Goal",
+            [
+                {"title": "A"},
+                {"title": "B", "depends_on": [0]},
+            ],
+        )
         planner.start("chat-1")
         # Find running step
         plan = store.get_plan_by_chat("chat-1", status_filter="active")
@@ -223,11 +237,15 @@ class TestPlannerCancel:
 class TestPlannerReplan:
     def test_replan_replaces_pending(self):
         planner, store = make_planner()
-        planner.init("chat-1", "Goal", [
-            {"title": "A"},
-            {"title": "B"},
-            {"title": "C"},
-        ])
+        planner.init(
+            "chat-1",
+            "Goal",
+            [
+                {"title": "A"},
+                {"title": "B"},
+                {"title": "C"},
+            ],
+        )
         planner.start("chat-1")
         # Step A is running, B and C are pending
         result = planner.replan("chat-1", [{"title": "New B"}, {"title": "New C"}])
@@ -270,10 +288,15 @@ class TestNormalizeStep:
 class TestFormatPlan:
     def test_format_plan_basic(self):
         store = MemoryBackend()
-        plan = store.create_plan("p-1", "chat-1", "My Goal", [
-            {"title": "Step A"},
-            {"title": "Step B"},
-        ])
+        plan = store.create_plan(
+            "p-1",
+            "chat-1",
+            "My Goal",
+            [
+                {"title": "Step A"},
+                {"title": "Step B"},
+            ],
+        )
         text = format_plan(plan)
         assert "My Goal" in text
         assert "Step A" in text

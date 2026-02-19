@@ -33,13 +33,13 @@ class LarkProvider(NotificationProvider):
         if self._tenant_token:
             return self._tenant_token
         if not self._app_id or not self._app_secret:
-            raise ValueError(
-                "LARK_APP_ID and LARK_APP_SECRET environment variables are required"
-            )
-        body = json.dumps({
-            "app_id": self._app_id,
-            "app_secret": self._app_secret,
-        }).encode()
+            raise ValueError("LARK_APP_ID and LARK_APP_SECRET environment variables are required")
+        body = json.dumps(
+            {
+                "app_id": self._app_id,
+                "app_secret": self._app_secret,
+            }
+        ).encode()
         req = urllib.request.Request(
             f"{BASE_URL}/auth/v3/tenant_access_token/internal",
             data=body,
@@ -83,9 +83,7 @@ class LarkProvider(NotificationProvider):
         except urllib.error.HTTPError as e:
             raise RuntimeError(f"Lark API HTTP error: {e.code}") from e
 
-    def send_message(
-        self, chat_id: str, text: str, msg_type: str = "text"
-    ) -> dict[str, Any]:
+    def send_message(self, chat_id: str, text: str, msg_type: str = "text") -> dict[str, Any]:
         """Send a message to a Lark chat."""
         if msg_type == "text":
             content = json.dumps({"text": text})
@@ -104,9 +102,7 @@ class LarkProvider(NotificationProvider):
         )
         return {"message_id": data.get("message_id", "")}
 
-    def create_chat(
-        self, name: str, description: str, members: list[str]
-    ) -> str:
+    def create_chat(self, name: str, description: str, members: list[str]) -> str:
         """Create a Lark group chat and return the chat_id."""
         data = self._api_request(
             "POST",
@@ -129,16 +125,12 @@ class LarkProvider(NotificationProvider):
         except Exception:
             return False
 
-    def send_card(
-        self, chat_id: str, card_data: dict[str, Any]
-    ) -> dict[str, Any]:
+    def send_card(self, chat_id: str, card_data: dict[str, Any]) -> dict[str, Any]:
         """Send an interactive card to a Lark chat."""
         card_json = json.dumps(card_data, ensure_ascii=False)
         return self.send_message(chat_id, card_json, msg_type="interactive")
 
-    def update_card(
-        self, message_id: str, card_data: dict[str, Any]
-    ) -> bool:
+    def update_card(self, message_id: str, card_data: dict[str, Any]) -> bool:
         """Update an existing interactive card."""
         card_json = json.dumps(card_data, ensure_ascii=False)
         try:
@@ -173,15 +165,12 @@ class LarkProvider(NotificationProvider):
         body_parts = []
         # image_type field
         body_parts.append(f"--{boundary}\r\n".encode())
-        body_parts.append(
-            b'Content-Disposition: form-data; name="image_type"\r\n\r\nmessage\r\n'
-        )
+        body_parts.append(b'Content-Disposition: form-data; name="image_type"\r\n\r\nmessage\r\n')
         # image field
         body_parts.append(f"--{boundary}\r\n".encode())
         fname = os.path.basename(image_path)
         body_parts.append(
-            f'Content-Disposition: form-data; name="image"; '
-            f'filename="{fname}"\r\n'.encode()
+            f'Content-Disposition: form-data; name="image"; filename="{fname}"\r\n'.encode()
         )
         body_parts.append(f"Content-Type: {mime_type}\r\n\r\n".encode())
         body_parts.append(file_data)
@@ -203,9 +192,7 @@ class LarkProvider(NotificationProvider):
             raise RuntimeError(f"Image upload failed: {data}")
         return data["data"]["image_key"]
 
-    def send_image(
-        self, chat_id: str, image_key: str
-    ) -> dict[str, Any]:
+    def send_image(self, chat_id: str, image_key: str) -> dict[str, Any]:
         """Send an image message to a Lark chat."""
         content = json.dumps({"image_key": image_key})
         data = self._api_request(

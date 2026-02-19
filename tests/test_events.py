@@ -39,8 +39,10 @@ class TestContractHelper:
 class TestResolvePlanForTask:
     def test_find_task_in_plan(self):
         store = MemoryBackend()
-        plan = store.create_plan(
-            "plan-1", "chat-1", "Goal",
+        store.create_plan(
+            "plan-1",
+            "chat-1",
+            "Goal",
             [{"title": "Step A"}, {"title": "Step B"}],
         )
         store.update_plan_status("plan-1", "active")
@@ -60,8 +62,10 @@ class TestResolvePlanForTask:
 class TestProcessEvents:
     def test_process_step_done(self):
         store = MemoryBackend()
-        plan = store.create_plan(
-            "plan-1", "chat-1", "Goal",
+        store.create_plan(
+            "plan-1",
+            "chat-1",
+            "Goal",
             [{"title": "A"}, {"title": "B"}],
         )
         store.update_plan_status("plan-1", "active")

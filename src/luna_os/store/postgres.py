@@ -43,9 +43,7 @@ class PostgresBackend(StorageBackend):
         if db_url is None:
             db_url = os.environ.get("DATABASE_URL")
         if not db_url:
-            raise ValueError(
-                "DATABASE_URL environment variable or db_url parameter is required"
-            )
+            raise ValueError("DATABASE_URL environment variable or db_url parameter is required")
         self._db_url = db_url
         self._conn: Any = None
 
@@ -60,9 +58,7 @@ class PostgresBackend(StorageBackend):
         self._conn.autocommit = True
         return self._conn
 
-    def _execute(
-        self, sql: str, params: Any = None, fetch: str | None = None
-    ) -> Any:
+    def _execute(self, sql: str, params: Any = None, fetch: str | None = None) -> Any:
         for attempt in range(2):
             try:
                 conn = self._get_conn()
@@ -123,9 +119,7 @@ class PostgresBackend(StorageBackend):
         return self.get_task(task_id)  # type: ignore[return-value]
 
     def get_task(self, task_id: str) -> Task | None:
-        row = self._execute(
-            "SELECT * FROM tasks WHERE id = %s", (task_id,), fetch="one"
-        )
+        row = self._execute("SELECT * FROM tasks WHERE id = %s", (task_id,), fetch="one")
         return self._dict_to_task(row)
 
     def list_tasks(self, status: str | None = None) -> list[Task]:
@@ -199,11 +193,7 @@ class PostgresBackend(StorageBackend):
                 fetch="all",
             )
             done_ids = {r["id"] for r in (rows or [])}
-        ready = [
-            t
-            for t in all_queued
-            if all(d in done_ids for d in (t.get("depends_on") or []))
-        ]
+        ready = [t for t in all_queued if all(d in done_ids for d in (t.get("depends_on") or []))]
         return self._dicts_to_tasks(ready)
 
     def active_tasks(self) -> list[Task]:
@@ -333,22 +323,21 @@ class PostgresBackend(StorageBackend):
         return self.get_plan(plan_id)  # type: ignore[return-value]
 
     def get_plan(self, plan_id: str) -> Plan | None:
-        plan_row = self._execute(
-            "SELECT * FROM plans WHERE id = %s", (plan_id,), fetch="one"
-        )
+        plan_row = self._execute("SELECT * FROM plans WHERE id = %s", (plan_id,), fetch="one")
         if not plan_row:
             return None
-        step_rows = self._execute(
-            "SELECT * FROM plan_steps WHERE plan_id = %s ORDER BY step_num",
-            (plan_id,),
-            fetch="all",
-        ) or []
+        step_rows = (
+            self._execute(
+                "SELECT * FROM plan_steps WHERE plan_id = %s ORDER BY step_num",
+                (plan_id,),
+                fetch="all",
+            )
+            or []
+        )
         plan_row["steps"] = step_rows
         return Plan.from_dict(plan_row)
 
-    def get_plan_by_chat(
-        self, chat_id: str, status_filter: str | None = None
-    ) -> Plan | None:
+    def get_plan_by_chat(self, chat_id: str, status_filter: str | None = None) -> Plan | None:
         if status_filter:
             plan_row = self._execute(
                 """SELECT * FROM plans
@@ -395,11 +384,14 @@ class PostgresBackend(StorageBackend):
                 )
         if not plan_row:
             return None
-        step_rows = self._execute(
-            "SELECT * FROM plan_steps WHERE plan_id = %s ORDER BY step_num",
-            (plan_row["id"],),
-            fetch="all",
-        ) or []
+        step_rows = (
+            self._execute(
+                "SELECT * FROM plan_steps WHERE plan_id = %s ORDER BY step_num",
+                (plan_row["id"],),
+                fetch="all",
+            )
+            or []
+        )
         plan_row["steps"] = step_rows
         return Plan.from_dict(plan_row)
 
@@ -411,9 +403,7 @@ class PostgresBackend(StorageBackend):
                 fetch="all",
             )
         else:
-            rows = self._execute(
-                "SELECT * FROM plans ORDER BY created_at DESC", fetch="all"
-            )
+            rows = self._execute("SELECT * FROM plans ORDER BY created_at DESC", fetch="all")
         return [Plan.from_dict(r) for r in (rows or [])]
 
     def update_plan_status(self, plan_id: str, status: str) -> None:
@@ -494,11 +484,14 @@ class PostgresBackend(StorageBackend):
         )
 
     def ready_steps(self, plan_id: str) -> list[Step]:
-        all_rows = self._execute(
-            "SELECT * FROM plan_steps WHERE plan_id = %s ORDER BY step_num",
-            (plan_id,),
-            fetch="all",
-        ) or []
+        all_rows = (
+            self._execute(
+                "SELECT * FROM plan_steps WHERE plan_id = %s ORDER BY step_num",
+                (plan_id,),
+                fetch="all",
+            )
+            or []
+        )
         done_nums = {s["step_num"] for s in all_rows if s["status"] == "done"}
         ready = []
         for s in all_rows:

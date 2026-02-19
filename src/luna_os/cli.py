@@ -298,10 +298,7 @@ def plan_cli(args: list[str]) -> None:
                 total = item["total"]
                 running = item.get("running_step")
                 running_info = f" | running: Step {running}" if running else ""
-                print(
-                    f"  {item['id']} [{status}] {item['goal']} "
-                    f"({done}/{total}){running_info}"
-                )
+                print(f"  {item['id']} [{status}] {item['goal']} ({done}/{total}){running_info}")
 
         elif cmd == "find-by-task":
             print_json(planner.find_by_task(args[1]))
