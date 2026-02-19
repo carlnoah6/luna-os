@@ -11,17 +11,20 @@ license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "Carl Li" }]
 dependencies = [
-    "asyncpg>=0.29",
-    "httpx>=0.27",
+    "psycopg2-binary>=2.9",
 ]
 
 [project.optional-dependencies]
+lark = [
+    "lark-toolkit>=1.0",
+]
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.23",
     "ruff>=0.4",
-    "pre-commit>=3.7",
 ]
+
+[project.scripts]
+luna-os = "luna_os.cli:main"
 
 [tool.ruff]
 target-version = "py311"
@@ -31,5 +34,4 @@ line-length = 100
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
