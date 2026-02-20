@@ -114,11 +114,16 @@ class LarkProvider(NotificationProvider):
         members: list[str],
         *,
         edit_permission: str = "only_owner",
+        restrict_messaging: bool = True,
     ) -> str:
         """Create a Lark group chat and return the chat_id.
 
-        By default the chat is locked down so only the bot (owner) can
-        edit settings.  Pass ``edit_permission="all_members"`` to relax.
+        By default the chat is locked down:
+        - ``edit_permission="only_owner"`` — members cannot change chat settings.
+        - ``restrict_messaging=True`` — only the bot (moderator) can send
+          messages; human members are read-only.
+
+        Pass ``restrict_messaging=False`` to allow all members to post.
         """
         data = self._api_request(
             "POST",
@@ -132,7 +137,28 @@ class LarkProvider(NotificationProvider):
                 "edit_permission": edit_permission,
             },
         )
-        return data.get("chat_id", "")
+        chat_id = data.get("chat_id", "")
+        if chat_id and restrict_messaging:
+            self.set_moderation(chat_id, "moderator_list")
+        return chat_id
+
+    def set_moderation(self, chat_id: str, setting: str = "moderator_list") -> bool:
+        """Set who can send messages in a chat.
+
+        Args:
+            chat_id: Target chat.
+            setting: ``"all_members"`` or ``"moderator_list"`` (only
+                     group owner / managers can post).
+        """
+        try:
+            self._api_request(
+                "PUT",
+                f"/im/v1/chats/{chat_id}/moderation",
+                body={"moderation_setting": setting},
+            )
+            return True
+        except Exception:
+            return False
 
     def update_chat(self, chat_id: str, **kwargs: Any) -> bool:
         """Update a Lark group chat's properties.
