@@ -107,8 +107,19 @@ class LarkProvider(NotificationProvider):
         )
         return {"message_id": data.get("message_id", "")}
 
-    def create_chat(self, name: str, description: str, members: list[str]) -> str:
-        """Create a Lark group chat and return the chat_id."""
+    def create_chat(
+        self,
+        name: str,
+        description: str,
+        members: list[str],
+        *,
+        edit_permission: str = "only_owner",
+    ) -> str:
+        """Create a Lark group chat and return the chat_id.
+
+        By default the chat is locked down so only the bot (owner) can
+        edit settings.  Pass ``edit_permission="all_members"`` to relax.
+        """
         data = self._api_request(
             "POST",
             "/im/v1/chats?set_bot_manager=true",
@@ -118,9 +129,24 @@ class LarkProvider(NotificationProvider):
                 "user_id_list": members,
                 "chat_mode": "group",
                 "chat_type": "private",
+                "edit_permission": edit_permission,
             },
         )
         return data.get("chat_id", "")
+
+    def update_chat(self, chat_id: str, **kwargs: Any) -> bool:
+        """Update a Lark group chat's properties.
+
+        Supported kwargs (passed directly to the Lark PUT /im/v1/chats API):
+        - name, description, edit_permission, moderation_permission, etc.
+        """
+        if not kwargs:
+            return True
+        try:
+            self._api_request("PUT", f"/im/v1/chats/{chat_id}", body=kwargs)
+            return True
+        except Exception:
+            return False
 
     def dissolve_chat(self, chat_id: str) -> bool:
         """Dissolve (delete) a Lark group chat."""

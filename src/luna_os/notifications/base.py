@@ -18,6 +18,19 @@ class NotificationProvider(ABC):
         """Create a group chat. Return the new chat_id."""
 
     @abstractmethod
+    def update_chat(self, chat_id: str, **kwargs: Any) -> bool:
+        """Update group chat properties (name, description, permissions, etc.).
+
+        Supported kwargs vary by provider. Common keys:
+        - name: New chat name.
+        - description: New chat description.
+        - edit_permission: Who can edit chat settings (e.g. "only_owner", "all_members").
+        - moderation_permission: Who can send messages.
+
+        Return success flag.
+        """
+
+    @abstractmethod
     def dissolve_chat(self, chat_id: str) -> bool:
         """Dissolve (delete) a group chat. Return success flag."""
 
