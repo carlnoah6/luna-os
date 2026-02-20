@@ -296,7 +296,7 @@ class PostgresBackend(StorageBackend):
                      DATE(completed_at AT TIME ZONE 'Asia/Singapore') as day
                    FROM tasks
                    WHERE status = 'done'
-                     AND completed_at > NOW() - INTERVAL '%s days'
+                     AND completed_at > NOW() - (%s || ' days')::interval
                    GROUP BY day
                    ORDER BY day DESC""",
                 (days,),
