@@ -265,7 +265,7 @@ class LarkProvider(NotificationProvider):
 
     # ── Streaming cards (CardKit) ────────────────────────────────
 
-    MAX_CARD_CONTENT = 3800
+    MAX_CARD_CONTENT: int = 3800
 
     def _truncate(self, text: str) -> str:
         if len(text) <= self.MAX_CARD_CONTENT:
