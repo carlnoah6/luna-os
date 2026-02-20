@@ -49,3 +49,53 @@ class NotificationProvider(ABC):
     @abstractmethod
     def send_image(self, chat_id: str, image_key: str) -> dict[str, Any]:
         """Send an image message to a chat. Return response metadata."""
+
+    # ── Streaming cards ──────────────────────────────────────────
+
+    @abstractmethod
+    def create_streaming_card(self, chat_id: str) -> dict[str, Any]:
+        """Create a streaming card in a chat.
+
+        Returns:
+            Dict with ``card_id`` and ``message_id`` keys.
+        """
+
+    @abstractmethod
+    def update_streaming_card(
+        self,
+        card_id: str,
+        content: str,
+        *,
+        seq: int = 0,
+        status: str | None = None,
+    ) -> bool:
+        """Update the content (and optional status) of a streaming card.
+
+        Args:
+            card_id: The card ID returned by :meth:`create_streaming_card`.
+            content: Markdown content for the main body.
+            seq: Monotonically increasing sequence number.
+            status: Optional status line shown below the main content.
+
+        Returns:
+            True on success.
+        """
+
+    @abstractmethod
+    def close_streaming_card(
+        self,
+        card_id: str,
+        content: str,
+        *,
+        seq: int = 0,
+    ) -> bool:
+        """Finalize a streaming card with final content and disable streaming.
+
+        Args:
+            card_id: The card ID.
+            content: Final markdown content.
+            seq: Sequence number (must be higher than last update).
+
+        Returns:
+            True on success.
+        """
