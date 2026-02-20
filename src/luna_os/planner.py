@@ -75,6 +75,48 @@ def normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
     return {"title": title, "prompt": prompt, "depends_on": depends_on}
 
 
+def validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate and fix step dependencies.
+
+    - Remove self-references (step depending on itself)
+    - Remove references to non-existent steps
+    - Detect circular dependencies and break them
+    """
+    total = len(steps)
+    valid_ids = set(range(1, total + 1))
+
+    for i, s in enumerate(steps):
+        step_num = i + 1
+        deps = s.get("depends_on") or []
+        cleaned = [d for d in deps if d != step_num and d in valid_ids]
+        s["depends_on"] = cleaned
+
+    # Detect cycles via topological sort
+    in_degree = {i + 1: 0 for i in range(total)}
+    adj: dict[int, list[int]] = {i + 1: [] for i in range(total)}
+    for i, s in enumerate(steps):
+        for d in s.get("depends_on") or []:
+            adj[d].append(i + 1)
+            in_degree[i + 1] += 1
+    queue = [n for n, deg in in_degree.items() if deg == 0]
+    visited = 0
+    while queue:
+        node = queue.pop(0)
+        visited += 1
+        for neighbor in adj[node]:
+            in_degree[neighbor] -= 1
+            if in_degree[neighbor] == 0:
+                queue.append(neighbor)
+
+    if visited < total:
+        # Break cycles by only allowing deps on earlier steps
+        for i, s in enumerate(steps):
+            step_num = i + 1
+            s["depends_on"] = [d for d in (s.get("depends_on") or []) if d < step_num]
+
+    return steps
+
+
 def format_plan(plan: Plan) -> str:
     """Format a plan for display as a text message."""
     status_label = {
@@ -371,7 +413,7 @@ Report results to: {chat_id}
         if existing:
             raise ValueError(f"Active plan already exists: {existing.id} ({existing.goal})")
 
-        steps = [normalize_step(s) for s in steps_raw]
+        steps = validate_steps([normalize_step(s) for s in steps_raw])
         if not steps:
             raise ValueError("No steps provided")
 
@@ -534,7 +576,7 @@ Report results to: {chat_id}
         if not plan:
             raise KeyError(f"No plan found for {chat_id}")
 
-        new_steps = [normalize_step(s) for s in new_steps_raw]
+        new_steps = validate_steps([normalize_step(s) for s in new_steps_raw])
 
         if append:
             next_num = max((s.step_num for s in plan.steps), default=0) + 1

@@ -108,15 +108,17 @@ svg.arrows {{ position: absolute; top: 0; left: 0; pointer-events: none; }}
 const steps = {steps_json};
 const statusIcons = {{pending:'', running:'\\u23f3', done:'\\u2705', failed:'\\u274c'}};
 
-function getPhase(id, memo) {{
+function getPhase(id, memo, visiting) {{
     if (memo[id] !== undefined) return memo[id];
+    if (visiting.has(id)) {{ memo[id] = 0; return 0; }}
+    visiting.add(id);
     const s = steps.find(s => s.id === id);
-    if (!s.deps.length) {{ memo[id] = 0; return 0; }}
-    memo[id] = Math.max(...s.deps.map(d => getPhase(d, memo))) + 1;
+    if (!s || !s.deps.length) {{ memo[id] = 0; return 0; }}
+    memo[id] = Math.max(...s.deps.filter(d => d !== id).map(d => getPhase(d, memo, visiting))) + 1;
     return memo[id];
 }}
 const phaseMemo = {{}};
-steps.forEach(s => getPhase(s.id, phaseMemo));
+steps.forEach(s => getPhase(s.id, phaseMemo, new Set()));
 
 const maxPhase = Math.max(...Object.values(phaseMemo));
 const phaseGroups = {{}};
@@ -126,28 +128,75 @@ steps.forEach(s => {{
     phaseGroups[p].push(s);
 }});
 
-const nodeW=200, nodeH=52, gapY=10, phaseGap=90, labelH=36;
+const nodeW=200, gapY=10, phaseGap=90, labelH=36;
 const COLS_PER_ROW=3, rowGap=50, svgPad=20, wrapMargin=30;
 const graph = document.getElementById('graph');
 
-let maxColH = 0;
-for (let p=0; p<=maxPhase; p++) {{
-    const group = phaseGroups[p] || [];
-    const colH = labelH + group.length * nodeH + (group.length - 1) * gapY;
-    maxColH = Math.max(maxColH, colH);
+// Pass 1: create nodes off-screen to measure actual heights
+const nodeElements = {{}};
+const measuredH = {{}};
+
+steps.forEach(s => {{
+    const el = document.createElement('div');
+    el.className = `node ${{s.status}}`;
+    el.style.cssText = `position:absolute; left:-9999px; top:0; width:${{nodeW}}px;`;
+    const icon = statusIcons[s.status] || '';
+    const tid = s.tid ? `<span class="node-tid">${{s.tid}}</span>` : '';
+    const dur = (s.status === 'running' && s.duration)
+        ? `<span class="node-duration">\\u23f1${{s.duration}}</span>` : '';
+    const meta = (tid || dur) ? `<div class="node-meta">${{tid}}${{dur}}</div>` : '';
+    el.innerHTML = `
+        <div class="node-icon">S${{s.id}}</div>
+        <div class="node-body">
+            <div class="node-text">${{s.title}}</div>
+            ${{meta}}
+        </div>
+        ${{icon ? \`<div class="node-status-icon">${{icon}}</div>\` : ''}}
+    `;
+    graph.appendChild(el);
+    nodeElements[s.id] = el;
+}});
+
+steps.forEach(s => {{ measuredH[s.id] = nodeElements[s.id].offsetHeight; }});
+
+function getColHeight(group) {{
+    let h = labelH;
+    group.forEach((s, i) => {{ h += measuredH[s.id] + (i > 0 ? gapY : 0); }});
+    return h;
 }}
 
+const numRows = Math.floor(maxPhase / COLS_PER_ROW) + 1;
+const rowMaxH = {{}};
+for (let r = 0; r < numRows; r++) {{
+    let maxH = 0;
+    for (let c = 0; c < COLS_PER_ROW; c++) {{
+        const p = r * COLS_PER_ROW + c;
+        if (p > maxPhase) break;
+        maxH = Math.max(maxH, getColHeight(phaseGroups[p] || []));
+    }}
+    rowMaxH[r] = maxH;
+}}
+
+// Pass 2: position with vertical centering
 let totalW=0, totalH=0;
 const nodePositions = {{}};
+const rowY = {{}};
+let cumY = 0;
+for (let r = 0; r < numRows; r++) {{
+    rowY[r] = cumY;
+    cumY += rowMaxH[r] + rowGap;
+}}
+totalH = cumY - rowGap;
 
 for (let p=0; p<=maxPhase; p++) {{
     const group = phaseGroups[p] || [];
     const row = Math.floor(p / COLS_PER_ROW);
     const colInRow = p % COLS_PER_ROW;
     const colX = wrapMargin + colInRow * (nodeW + phaseGap);
-    const baseY = row * (maxColH + rowGap);
-    const colContentH = group.length * nodeH + (group.length - 1) * gapY;
-    const offsetY = (maxColH - labelH - colContentH) / 2;
+    const baseY = rowY[row];
+    const thisColH = getColHeight(group);
+    const maxH = rowMaxH[row];
+    const offsetY = (maxH - thisColH) / 2;
 
     const lbl = document.createElement('div');
     lbl.className = 'phase-label';
@@ -161,32 +210,18 @@ for (let p=0; p<=maxPhase; p++) {{
     tag.textContent = group.length > 1 ? 'parallel' : (p > 0 ? 'sequential' : '');
     graph.appendChild(tag);
 
+    let curY = baseY + offsetY + labelH;
     group.forEach((s, i) => {{
-        const y = baseY + offsetY + labelH + i * (nodeH + gapY);
-        const icon = statusIcons[s.status] || '';
-        const tid = s.tid ? `<span class="node-tid">${{s.tid}}</span>` : '';
-        const dur = (s.status === 'running' && s.duration)
-            ? `<span class="node-duration">\\u23f1${{s.duration}}</span>` : '';
-        const meta = (tid || dur) ? `<div class="node-meta">${{tid}}${{dur}}</div>` : '';
-        const el = document.createElement('div');
-        el.className = `node ${{s.status}}`;
-        el.style.cssText = `left:${{colX}}px; top:${{y}}px;`;
-        el.innerHTML = `
-            <div class="node-icon">S${{s.id}}</div>
-            <div class="node-body">
-                <div class="node-text">${{s.title}}</div>
-                ${{meta}}
-            </div>
-            ${{icon ? `<div class="node-status-icon">${{icon}}</div>` : ''}}
-        `;
-        graph.appendChild(el);
+        const h = measuredH[s.id];
+        const el = nodeElements[s.id];
+        el.style.cssText = `position:absolute; left:${{colX}}px; top:${{curY}}px; width:${{nodeW}}px;`;
         nodePositions[s.id] = {{
-            cx: colX + nodeW, cy: y + nodeH / 2,
-            lx: colX, ly: y + nodeH / 2,
+            cx: colX + nodeW, cy: curY + h / 2,
+            lx: colX, ly: curY + h / 2,
         }};
+        curY += h + gapY;
     }});
     totalW = Math.max(totalW, colX + nodeW);
-    totalH = Math.max(totalH, baseY + maxColH);
 }}
 
 graph.style.width = (totalW + wrapMargin + svgPad) + 'px';
