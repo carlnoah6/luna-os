@@ -262,3 +262,115 @@ class LarkProvider(NotificationProvider):
             },
         )
         return {"message_id": data.get("message_id", "")}
+
+    # ── Streaming cards (CardKit) ────────────────────────────────
+
+    MAX_CARD_CONTENT: int = 3800
+
+    def _truncate(self, text: str) -> str:
+        if len(text) <= self.MAX_CARD_CONTENT:
+            return text
+        return text[: self.MAX_CARD_CONTENT - 20] + "\n\n... (truncated)"
+
+    def create_streaming_card(self, chat_id: str) -> dict[str, Any]:
+        """Create a CardKit streaming card and send it to *chat_id*."""
+        card_json = {
+            "schema": "2.0",
+            "config": {"wide_screen_mode": True, "streaming_mode": True},
+            "body": {
+                "elements": [
+                    {"tag": "markdown", "content": " ", "element_id": "content"},
+                    {"tag": "markdown", "content": " ", "element_id": "status"},
+                ]
+            },
+        }
+        data = self._api_request(
+            "POST",
+            "/cardkit/v1/cards",
+            body={"type": "card_json", "data": json.dumps(card_json)},
+        )
+        card_id = data.get("card_id", "")
+
+        im_data = self._api_request(
+            "POST",
+            "/im/v1/messages?receive_id_type=chat_id",
+            body={
+                "receive_id": chat_id,
+                "msg_type": "interactive",
+                "content": json.dumps(
+                    {"type": "card", "data": {"card_id": card_id}}
+                ),
+            },
+        )
+        return {
+            "card_id": card_id,
+            "message_id": im_data.get("message_id", ""),
+        }
+
+    def update_streaming_card(
+        self,
+        card_id: str,
+        content: str,
+        *,
+        seq: int = 0,
+        status: str | None = None,
+    ) -> bool:
+        """Update the content of a streaming card."""
+        content = self._truncate(content)
+        try:
+            self._api_request(
+                "PUT",
+                f"/cardkit/v1/cards/{card_id}/elements/content/content",
+                body={"content": content or " ", "sequence": seq},
+            )
+            if status is not None:
+                self._api_request(
+                    "PUT",
+                    f"/cardkit/v1/cards/{card_id}/elements/status/content",
+                    body={"content": status or " ", "sequence": seq + 1},
+                )
+            return True
+        except (RuntimeError, urllib.error.URLError):
+            return False
+
+    def close_streaming_card(
+        self,
+        card_id: str,
+        content: str,
+        *,
+        seq: int = 0,
+    ) -> bool:
+        """Finalize a streaming card and disable streaming mode."""
+        content = self._truncate(content)
+        try:
+            self._api_request(
+                "PUT",
+                f"/cardkit/v1/cards/{card_id}/elements/content/content",
+                body={"content": content or " ", "sequence": seq},
+            )
+            self._api_request(
+                "PUT",
+                f"/cardkit/v1/cards/{card_id}/elements/status/content",
+                body={"content": " ", "sequence": seq + 1},
+            )
+            # Settings endpoint requires PATCH, not PUT
+            token = self._get_tenant_token()
+            url = f"{BASE_URL}/cardkit/v1/cards/{card_id}/settings"
+            body = json.dumps({
+                "settings": json.dumps({"streaming_mode": False}),
+                "sequence": seq + 2,
+            }).encode()
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                method="PATCH",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read())
+            return result.get("code") == 0
+        except (RuntimeError, urllib.error.URLError):
+            return False
