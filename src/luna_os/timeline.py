@@ -151,7 +151,7 @@ steps.forEach(s => {{
             <div class="node-text">${{s.title}}</div>
             ${{meta}}
         </div>
-        ${{icon ? \`<div class="node-status-icon">${{icon}}</div>\` : ''}}
+        ${{icon ? \\`<div class="node-status-icon">${{icon}}</div>\\` : ''}}
     `;
     graph.appendChild(el);
     nodeElements[s.id] = el;
@@ -214,7 +214,8 @@ for (let p=0; p<=maxPhase; p++) {{
     group.forEach((s, i) => {{
         const h = measuredH[s.id];
         const el = nodeElements[s.id];
-        el.style.cssText = `position:absolute; left:${{colX}}px; top:${{curY}}px; width:${{nodeW}}px;`;
+        el.style.cssText = `position:absolute; left:${{colX}}px;`
+            + ` top:${{curY}}px; width:${{nodeW}}px;`;
         nodePositions[s.id] = {{
             cx: colX + nodeW, cy: curY + h / 2,
             lx: colX, ly: curY + h / 2,

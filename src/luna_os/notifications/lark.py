@@ -107,8 +107,24 @@ class LarkProvider(NotificationProvider):
         )
         return {"message_id": data.get("message_id", "")}
 
-    def create_chat(self, name: str, description: str, members: list[str]) -> str:
-        """Create a Lark group chat and return the chat_id."""
+    def create_chat(
+        self,
+        name: str,
+        description: str,
+        members: list[str],
+        *,
+        edit_permission: str = "only_owner",
+        restrict_messaging: bool = True,
+    ) -> str:
+        """Create a Lark group chat and return the chat_id.
+
+        By default the chat is locked down:
+        - ``edit_permission="only_owner"`` — members cannot change chat settings.
+        - ``restrict_messaging=True`` — only the bot (moderator) can send
+          messages; human members are read-only.
+
+        Pass ``restrict_messaging=False`` to allow all members to post.
+        """
         data = self._api_request(
             "POST",
             "/im/v1/chats?set_bot_manager=true",
@@ -118,9 +134,45 @@ class LarkProvider(NotificationProvider):
                 "user_id_list": members,
                 "chat_mode": "group",
                 "chat_type": "private",
+                "edit_permission": edit_permission,
             },
         )
-        return data.get("chat_id", "")
+        chat_id = data.get("chat_id", "")
+        if chat_id and restrict_messaging:
+            self.set_moderation(chat_id, "moderator_list")
+        return chat_id
+
+    def set_moderation(self, chat_id: str, setting: str = "moderator_list") -> bool:
+        """Set who can send messages in a chat.
+
+        Args:
+            chat_id: Target chat.
+            setting: ``"all_members"`` or ``"moderator_list"`` (only
+                     group owner / managers can post).
+        """
+        try:
+            self._api_request(
+                "PUT",
+                f"/im/v1/chats/{chat_id}/moderation",
+                body={"moderation_setting": setting},
+            )
+            return True
+        except Exception:
+            return False
+
+    def update_chat(self, chat_id: str, **kwargs: Any) -> bool:
+        """Update a Lark group chat's properties.
+
+        Supported kwargs (passed directly to the Lark PUT /im/v1/chats API):
+        - name, description, edit_permission, moderation_permission, etc.
+        """
+        if not kwargs:
+            return True
+        try:
+            self._api_request("PUT", f"/im/v1/chats/{chat_id}", body=kwargs)
+            return True
+        except Exception:
+            return False
 
     def dissolve_chat(self, chat_id: str) -> bool:
         """Dissolve (delete) a Lark group chat."""
