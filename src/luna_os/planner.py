@@ -78,26 +78,29 @@ def normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
 def validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Validate and fix step dependencies.
 
+    ``depends_on`` values are **0-indexed** offsets (matching the user/LLM
+    convention).  Validation uses the same 0-indexed space; the store layer
+    converts to 1-indexed step numbers on persist.
+
     - Remove self-references (step depending on itself)
     - Remove references to non-existent steps
     - Detect circular dependencies and break them
     """
     total = len(steps)
-    valid_ids = set(range(1, total + 1))
+    valid_ids = set(range(total))  # 0-indexed
 
     for i, s in enumerate(steps):
-        step_num = i + 1
         deps = s.get("depends_on") or []
-        cleaned = [d for d in deps if d != step_num and d in valid_ids]
+        cleaned = [d for d in deps if d != i and d in valid_ids]
         s["depends_on"] = cleaned
 
-    # Detect cycles via topological sort
-    in_degree = {i + 1: 0 for i in range(total)}
-    adj: dict[int, list[int]] = {i + 1: [] for i in range(total)}
+    # Detect cycles via topological sort (0-indexed)
+    in_degree = {i: 0 for i in range(total)}
+    adj: dict[int, list[int]] = {i: [] for i in range(total)}
     for i, s in enumerate(steps):
         for d in s.get("depends_on") or []:
-            adj[d].append(i + 1)
-            in_degree[i + 1] += 1
+            adj[d].append(i)
+            in_degree[i] += 1
     queue = [n for n, deg in in_degree.items() if deg == 0]
     visited = 0
     while queue:
@@ -111,8 +114,7 @@ def validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if visited < total:
         # Break cycles by only allowing deps on earlier steps
         for i, s in enumerate(steps):
-            step_num = i + 1
-            s["depends_on"] = [d for d in (s.get("depends_on") or []) if d < step_num]
+            s["depends_on"] = [d for d in (s.get("depends_on") or []) if d < i]
 
     return steps
 
