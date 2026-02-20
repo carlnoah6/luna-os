@@ -6,6 +6,7 @@ via the event queue, and utility functions for event processing.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from luna_os.store.base import StorageBackend
@@ -124,6 +125,7 @@ def process_events(
             store.ack_event(evt.id)
             processed += 1
         except Exception:
+            logging.getLogger(__name__).exception("Error processing event %s", evt.id)
             store.ack_event(evt.id)  # ack to prevent infinite loop
 
     return processed

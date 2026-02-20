@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -22,6 +23,13 @@ from luna_os.types import (
 )
 
 SGT = timezone(timedelta(hours=8))
+
+
+def _validate_field_names(fields: dict[str, Any]) -> None:
+    """Validate that field names are safe for SQL interpolation."""
+    for key in fields:
+        if not re.match(r"^[a-z_][a-z0-9_]*$", key):
+            raise ValueError(f"Invalid field name: {key!r}")
 
 
 def _row_to_dict(cursor: Any, row: Any) -> dict[str, Any] | None:
@@ -139,6 +147,7 @@ class PostgresBackend(StorageBackend):
     def update_task(self, task_id: str, **fields: Any) -> None:
         if not fields:
             return
+        _validate_field_names(fields)
         fields["updated_at"] = now_utc()
         sets = ", ".join(f"{k} = %s" for k in fields)
         vals = list(fields.values()) + [task_id]
@@ -455,6 +464,7 @@ class PostgresBackend(StorageBackend):
     def update_step(self, plan_id: str, step_num: int, **fields: Any) -> None:
         if not fields:
             return
+        _validate_field_names(fields)
         sets = ", ".join(f"{k} = %s" for k in fields)
         vals = list(fields.values()) + [plan_id, step_num]
         self._execute(

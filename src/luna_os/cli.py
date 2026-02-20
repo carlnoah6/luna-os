@@ -228,7 +228,7 @@ def task_cli(args: list[str]) -> None:
             print(f"Unknown task command: {cmd}", file=sys.stderr)
             sys.exit(1)
 
-    except (ValueError, KeyError, RuntimeError) as e:
+    except (ValueError, KeyError, RuntimeError, IndexError) as e:
         print_json({"error": str(e)})
         sys.exit(1)
 
@@ -307,7 +307,7 @@ def plan_cli(args: list[str]) -> None:
             print(f"Unknown plan command: {cmd}", file=sys.stderr)
             sys.exit(1)
 
-    except (ValueError, KeyError, RuntimeError) as e:
+    except (ValueError, KeyError, RuntimeError, IndexError) as e:
         print_json({"error": str(e)})
         sys.exit(1)
 

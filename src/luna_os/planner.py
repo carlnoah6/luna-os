@@ -239,13 +239,15 @@ class Planner:
             title = f"Plan: {(plan.goal or '')[:80]}{status_label}"
             html = generate_html(steps_data, title)
             out_dir = tempfile.mkdtemp(prefix="plan-graph-")
-            import os
+            try:
+                import os
 
-            png_path = os.path.join(out_dir, "timeline.png")
-            render_png(html, png_path)
-            image_key = self.notifications.upload_image(png_path)
-            self.notifications.send_image(target, image_key)
-            shutil.rmtree(out_dir, ignore_errors=True)
+                png_path = os.path.join(out_dir, "timeline.png")
+                render_png(html, png_path)
+                image_key = self.notifications.upload_image(png_path)
+                self.notifications.send_image(target, image_key)
+            finally:
+                shutil.rmtree(out_dir, ignore_errors=True)
         except Exception as exc:
             logger.warning("send_plan_graph failed: %s", exc)
 

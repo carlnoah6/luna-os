@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -27,10 +28,11 @@ class LarkProvider(NotificationProvider):
         self._app_id = app_id or os.environ.get("LARK_APP_ID", "")
         self._app_secret = app_secret or os.environ.get("LARK_APP_SECRET", "")
         self._tenant_token: str | None = None
+        self._token_expires_at: float = 0.0
 
     def _get_tenant_token(self) -> str:
-        """Obtain (and cache) a tenant access token."""
-        if self._tenant_token:
+        """Obtain (and cache) a tenant access token with expiry tracking."""
+        if self._tenant_token and time.time() < self._token_expires_at:
             return self._tenant_token
         if not self._app_id or not self._app_secret:
             raise ValueError("LARK_APP_ID and LARK_APP_SECRET environment variables are required")
@@ -51,6 +53,9 @@ class LarkProvider(NotificationProvider):
         if data.get("code") != 0:
             raise RuntimeError(f"Failed to get tenant token: {data}")
         self._tenant_token = data["tenant_access_token"]
+        # Lark tokens expire in ~2 hours; refresh 5 minutes early
+        expire_secs = data.get("expire", 7200)
+        self._token_expires_at = time.time() + expire_secs - 300
         return self._tenant_token  # type: ignore[return-value]
 
     def _api_request(

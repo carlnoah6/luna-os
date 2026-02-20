@@ -53,13 +53,19 @@ class OpenClawRunner(AgentRunner):
             str(Path.home() / ".openclaw" / "agents" / "main" / "sessions"),
         )
         session_dir = Path(sessions_dir)
-        jsonl_path = session_dir / f"{session_key}.jsonl"
-        lock_path = session_dir / f"{session_key}.jsonl.lock"
+
+        # Prevent path traversal
+        safe_key = Path(session_key).name
+        if safe_key != session_key or ".." in session_key:
+            return False
+
+        jsonl_path = session_dir / f"{safe_key}.jsonl"
+        lock_path = session_dir / f"{safe_key}.jsonl.lock"
 
         # Circuit breaker check
         import glob as _glob
 
-        if _glob.glob(str(session_dir / f"{session_key}.jsonl.loop-*")):
+        if _glob.glob(str(session_dir / f"{safe_key}.jsonl.loop-*")):
             return False
 
         now = time.time()
