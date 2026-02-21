@@ -134,7 +134,7 @@ steps.forEach(s => {{
 }});
 
 const nodeW=200, gapY=10, phaseGap=90, labelH=36;
-const COLS_PER_ROW=3, svgPad=20, wrapMargin=30;
+const COLS_PER_ROW=3, svgPad=60, wrapMargin=30, topPad=60;
 const arrowLineSpacing=8, baseRowGap=30;
 const graph = document.getElementById('graph');
 
@@ -200,7 +200,7 @@ steps.forEach(s => {{
 let totalW=0, totalH=0;
 const nodePositions = {{}};
 const rowY = {{}};
-let cumY = 0;
+let cumY = topPad;
 for (let r = 0; r < numRows; r++) {{
     rowY[r] = cumY;
     // Calculate gap after this row: base gap + space for cross-row arrows
@@ -248,6 +248,9 @@ for (let p=0; p<=maxPhase; p++) {{
         nodePositions[s.id] = {{
             cx: colX + nodeW, cy: curY + h / 2,
             lx: colX, ly: curY + h / 2,
+            top: curY, bottom: curY + h,
+            midX: colX + nodeW / 2,
+            phase: phaseMemo[s.id],
         }};
         curY += h + gapY;
     }});
@@ -255,12 +258,12 @@ for (let p=0; p<=maxPhase; p++) {{
 }}
 
 graph.style.width = (totalW + wrapMargin + svgPad) + 'px';
-graph.style.height = (totalH + svgPad) + 'px';
+graph.style.height = (totalH + svgPad + topPad) + 'px';
 
 const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 svg.setAttribute('class', 'arrows');
 svg.setAttribute('width', totalW + wrapMargin + svgPad);
-svg.setAttribute('height', totalH + svgPad);
+svg.setAttribute('height', totalH + svgPad + topPad);
 
 const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
 
@@ -286,6 +289,21 @@ steps.forEach(s => stepMap[s.id] = s);
 // Track cross-row arrow index for even spacing in the gap
 const crossRowArrowIdx = {{}};
 
+// Collect all node bounding boxes for obstruction detection
+const allNodeBoxes = [];
+steps.forEach(s => {{
+    const pos = nodePositions[s.id];
+    if (pos) allNodeBoxes.push({{
+        id: s.id, phase: pos.phase,
+        left: pos.lx, right: pos.cx,
+        top: pos.top, bottom: pos.bottom,
+    }});
+}});
+
+// Track bypass arrow indices for above/below spacing
+let bypassAboveIdx = 0;
+let bypassBelowIdx = 0;
+
 steps.forEach(s => {{
     s.deps.forEach(depId => {{
         const from = nodePositions[depId];
@@ -300,10 +318,43 @@ steps.forEach(s => {{
         const fromRow = Math.floor(phaseMemo[depId] / COLS_PER_ROW);
         const toRow = Math.floor(phaseMemo[s.id] / COLS_PER_ROW);
         if (fromRow === toRow) {{
-            const x1=from.cx+2, y1=from.cy, x2=to.lx-2, y2=to.ly;
-            const midX = (x1+x2)/2;
-            const d = `M${{x1}},${{y1}} C${{midX}},${{y1}} ${{midX}},${{y2}} ${{x2}},${{y2}}`;
-            path.setAttribute('d', d);
+            // Check if any intermediate nodes are in the way
+            const fromPhase = phaseMemo[depId];
+            const toPhase = phaseMemo[s.id];
+            const intermediateNodes = allNodeBoxes.filter(n =>
+                n.phase > fromPhase && n.phase < toPhase
+                && Math.floor(n.phase / COLS_PER_ROW) === fromRow
+            );
+            if (intermediateNodes.length === 0) {{
+                // Direct bezier — no obstruction
+                const x1=from.cx+2, y1=from.cy, x2=to.lx-2, y2=to.ly;
+                const midX = (x1+x2)/2;
+                path.setAttribute('d',
+                    `M${{x1}},${{y1}} C${{midX}},${{y1}} ${{midX}},${{y2}} ${{x2}},${{y2}}`);
+            }} else {{
+                // Bypass arc — route above or below based on node position
+                const x1 = from.cx + 2, y1 = from.cy;
+                const x2 = to.lx - 2, y2 = to.ly;
+                const bypassSpacing = 18;
+                // Determine direction: compare source node Y to row center
+                const rCenter = rowY[fromRow] + rowMaxH[fromRow] / 2;
+                const avgY = (from.cy + to.ly) / 2;
+                if (avgY <= rCenter) {{
+                    // Arc above
+                    const minTop = Math.min(...intermediateNodes.map(n => n.top));
+                    const arcY = minTop - 35 - bypassAboveIdx * bypassSpacing;
+                    bypassAboveIdx++;
+                    path.setAttribute('d',
+                        `M${{x1}},${{y1}} C${{x1}},${{arcY}} ${{x2}},${{arcY}} ${{x2}},${{y2}}`);
+                }} else {{
+                    // Arc below
+                    const maxBot = Math.max(...intermediateNodes.map(n => n.bottom));
+                    const arcY = maxBot + 35 + bypassBelowIdx * bypassSpacing;
+                    bypassBelowIdx++;
+                    path.setAttribute('d',
+                        `M${{x1}},${{y1}} C${{x1}},${{arcY}} ${{x2}},${{arcY}} ${{x2}},${{y2}}`);
+                }}
+            }}
         }} else {{
             const x1=from.cx+2, y1=from.cy, x2=to.lx-2, y2=to.ly;
             // Route through the gap between rows, spacing arrows evenly
