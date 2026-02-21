@@ -177,6 +177,23 @@ class PostgresBackend(StorageBackend):
             (error, now, now, task_id),
         )
 
+    def wait_task(self, task_id: str, wait_type: str = "user_input", wait_prompt: str = "") -> None:
+        """Mark a task as waiting for user input."""
+        now = now_utc()
+        self._execute(
+            """UPDATE tasks SET status='waiting', wait_type=%s, wait_prompt=%s,
+                   waited_at=%s, updated_at=%s WHERE id=%s""",
+            (wait_type, wait_prompt, now, now, task_id),
+        )
+
+    def resume_task(self, task_id: str) -> None:
+        """Resume a waiting task back to running."""
+        self._execute(
+            """UPDATE tasks SET status='running', wait_type=NULL, wait_prompt=NULL,
+                   waited_at=NULL, updated_at=%s WHERE id=%s AND status='waiting'""",
+            (now_utc(), task_id),
+        )
+
     def cancel_task(self, task_id: str) -> None:
         self._execute(
             "UPDATE tasks SET status='cancelled', updated_at=%s WHERE id=%s",
@@ -491,6 +508,22 @@ class PostgresBackend(StorageBackend):
             """UPDATE plan_steps SET status='failed', result=%s, completed_at=%s
                WHERE plan_id=%s AND step_num=%s""",
             (error, now_utc(), plan_id, step_num),
+        )
+
+    def wait_step(self, plan_id: str, step_num: int, reason: str) -> None:
+        """Mark a step as waiting for user input."""
+        self._execute(
+            """UPDATE plan_steps SET status='waiting', result=%s
+               WHERE plan_id=%s AND step_num=%s""",
+            (reason, plan_id, step_num),
+        )
+
+    def resume_step(self, plan_id: str, step_num: int) -> None:
+        """Resume a waiting step back to running."""
+        self._execute(
+            """UPDATE plan_steps SET status='running', result=NULL
+               WHERE plan_id=%s AND step_num=%s AND status='waiting'""",
+            (plan_id, step_num),
         )
 
     def ready_steps(self, plan_id: str) -> list[Step]:

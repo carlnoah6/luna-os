@@ -38,6 +38,7 @@ class StepStatus(StrEnum):
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    WAITING = "waiting"
 
 
 class Priority(StrEnum):

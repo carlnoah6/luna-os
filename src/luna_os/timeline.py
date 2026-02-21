@@ -91,6 +91,8 @@ body {{
 .node.done .node-icon {{ background: #4CAF50; }}
 .node.failed {{ border-left-color: #F44336; }}
 .node.failed .node-icon {{ background: #F44336; }}
+.node.waiting {{ border-left-color: #FF9800; background: #fff8e1; }}
+.node.waiting .node-icon {{ background: #FF9800; }}
 .phase-label {{
     position: absolute; font-size: 10px; font-weight: 600;
     color: #666; padding: 2px 10px; border-radius: 10px; background: #eee;
@@ -106,7 +108,10 @@ svg.arrows {{ position: absolute; top: 0; left: 0; pointer-events: none; }}
 </div>
 <script>
 const steps = {steps_json};
-const statusIcons = {{pending:'', running:'\\u23f3', done:'\\u2705', failed:'\\u274c'}};
+const statusIcons = {{
+    pending:'', running:'\\u23f3', done:'\\u2705',
+    failed:'\\u274c', waiting:'\\u270b'
+}};
 
 function getPhase(id, memo, visiting) {{
     if (memo[id] !== undefined) return memo[id];
