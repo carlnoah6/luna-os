@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import time
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
@@ -300,6 +302,74 @@ class Planner:
         except Exception as exc:
             logger.warning("send_plan_graph failed: %s", exc)
 
+    def _update_dashboard(self, trigger: str = "unknown") -> None:
+        """Trigger dashboard refresh if the notification provider supports it."""
+        if self.notifications:
+            with contextlib.suppress(Exception):
+                self.notifications.update_dashboard(trigger)
+
+    def _update_group_title(self, chat_id: str) -> None:
+        """Trigger group title update if the notification provider supports it."""
+        if self.notifications and chat_id:
+            with contextlib.suppress(Exception):
+                self.notifications.update_group_title(chat_id)
+
+    def _handle_restart_pause(self) -> bool:
+        """On gateway restart, pause all active plans (5-min cooldown).
+
+        Returns True if we're in cooldown (caller should skip further work).
+        """
+        restart_file = os.environ.get(
+            "RESTART_COOLDOWN_FILE", "/tmp/openclaw-restart-ts"
+        )
+        paused_flag = os.environ.get(
+            "RESTART_PAUSED_FLAG", "/tmp/openclaw-restart-paused"
+        )
+        cooldown_secs = int(os.environ.get("RESTART_COOLDOWN_SECONDS", "300"))
+
+        if not os.path.exists(restart_file):
+            return False
+
+        try:
+            mtime = os.path.getmtime(restart_file)
+        except OSError:
+            return False
+
+        age = time.time() - mtime
+        if age > cooldown_secs:
+            return False
+
+        # Already handled this restart?
+        if os.path.exists(paused_flag):
+            try:
+                flag_mtime = os.path.getmtime(paused_flag)
+                if flag_mtime >= mtime:
+                    return True  # Still in cooldown, already paused
+            except OSError:
+                pass
+
+        # First check after restart — pause all active plans
+        active_plans = self.store.list_plans(status="active")
+        if not active_plans:
+            with open(paused_flag, "w") as f:
+                f.write(str(time.time()))
+            return True
+
+        for p in active_plans:
+            full = self.store.get_plan(p.id)
+            if full and full.status.value == "active":
+                self.store.update_plan_status(full.id, "paused")
+                self._notify(
+                    full.chat_id,
+                    f"⏸️ Plan auto-paused (gateway restart cooldown)\n\n"
+                    f"{full.goal[:60]}\n\nReply 'resume' to continue.",
+                )
+
+        with open(paused_flag, "w") as f:
+            f.write(str(time.time()))
+        logger.info("Restart cooldown: paused %d active plans", len(active_plans))
+        return True
+
     # -- Spawn helpers ---------------------------------------------------------
 
     def _build_spawn_prompt(self, plan: Plan, step: Step, task_chat_id: str = "") -> str:
@@ -458,6 +528,8 @@ Report results to: {chat_id}
                 self._notify(plan.chat_id, format_plan(plan))
                 self._send_plan_graph(plan)
 
+        self._update_group_title(chat_id)
+
         return {
             "started": True,
             "plan_id": plan.id if plan else "",
@@ -550,6 +622,10 @@ Report results to: {chat_id}
                             self._notify(plan.chat_id, summary)
                         plan_completed = True
 
+        self._update_dashboard("step_done")
+        if plan:
+            self._update_group_title(plan.chat_id)
+
         return {
             "step_done": step_num,
             "result": result[:100],
@@ -586,6 +662,8 @@ Report results to: {chat_id}
         if plan:
             self._notify(plan.chat_id, format_plan(plan))
             self._send_plan_graph(plan)
+
+        self._update_dashboard("step_fail")
 
         return {"step_failed": step_num, "error": error[:100]}
 
@@ -675,6 +753,9 @@ Report results to: {chat_id}
         if plan:
             self._notify(plan.chat_id, format_plan(plan))
             self._send_plan_graph(plan)
+
+        self._update_dashboard("cancel")
+        self._update_group_title(chat_id)
 
         return {"cancelled": True}
 
@@ -797,6 +878,10 @@ Report results to: {chat_id}
 
         Also checks for expired drafts and stale plans.
         """
+        # Restart cooldown: pause all active plans and skip processing
+        if self._handle_restart_pause():
+            return {"skipped": True, "reason": "restart_cooldown"}
+
         processed = process_events(
             self.store,
             on_step_done=lambda plan, step_num, result: self.step_done(
