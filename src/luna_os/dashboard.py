@@ -16,10 +16,17 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
+import json
+import logging
+import os
+import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from luna_os.store.base import StorageBackend
+
+logger = logging.getLogger(__name__)
 
 SGT = timezone(timedelta(hours=8))
 
@@ -139,15 +146,52 @@ class DashboardBuilder:
         *,
         max_concurrent: int = 8,
         session_data: list[dict[str, Any]] | None = None,
+        session_overview_file: str | None = None,
+        session_overview_script: str | None = None,
     ) -> None:
         self.store = store
         self.max_concurrent = max_concurrent
+        self._session_overview_file = session_overview_file or os.environ.get(
+            "SESSION_OVERVIEW_FILE",
+            os.path.expanduser("~/.openclaw/workspace/data/session-overview.json"),
+        )
+        self._session_overview_script = session_overview_script or os.environ.get(
+            "SESSION_OVERVIEW_SCRIPT",
+            os.path.expanduser("~/.openclaw/workspace/scripts/session-overview.py"),
+        )
         self.session_data = session_data
 
     # ── Global dashboard ─────────────────────────────────────
 
+    def _refresh_session_data(self) -> None:
+        """Refresh session overview by running the script and loading the JSON."""
+        # Try to refresh the data file
+        if os.path.exists(self._session_overview_script):
+            with contextlib.suppress(Exception):
+                subprocess.run(
+                    ["python3", self._session_overview_script],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+
+        # Load from file
+        if os.path.exists(self._session_overview_file):
+            try:
+                with open(self._session_overview_file) as f:
+                    overview = json.load(f)
+                self.session_data = overview.get("sessions", [])
+            except Exception:
+                self.session_data = []
+        else:
+            self.session_data = []
+
     def build_global(self) -> dict[str, Any]:
         """Build the global task dashboard card."""
+        # Auto-load session data if not provided
+        if self.session_data is None:
+            self._refresh_session_data()
+
         now = datetime.now(SGT)
         tasks = self._list_tasks_as_dicts()
 
