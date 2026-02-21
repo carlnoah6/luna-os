@@ -129,7 +129,8 @@ steps.forEach(s => {{
 }});
 
 const nodeW=200, gapY=10, phaseGap=90, labelH=36;
-const COLS_PER_ROW=3, rowGap=50, svgPad=20, wrapMargin=30;
+const COLS_PER_ROW=3, svgPad=20, wrapMargin=30;
+const arrowLineSpacing=8, baseRowGap=30;
 const graph = document.getElementById('graph');
 
 // Pass 1: create nodes off-screen to measure actual heights
@@ -151,7 +152,7 @@ steps.forEach(s => {{
             <div class="node-text">${{s.title}}</div>
             ${{meta}}
         </div>
-        ${{icon ? \\`<div class="node-status-icon">${{icon}}</div>\\` : ''}}
+        ${{icon ? `<div class="node-status-icon">${{icon}}</div>` : ''}}
     `;
     graph.appendChild(el);
     nodeElements[s.id] = el;
@@ -177,16 +178,39 @@ for (let r = 0; r < numRows; r++) {{
     rowMaxH[r] = maxH;
 }}
 
-// Pass 2: position with vertical centering
+// Count cross-row arrows between consecutive rows to size gaps dynamically
+const crossRowArrows = {{}};
+steps.forEach(s => {{
+    const toRow = Math.floor(phaseMemo[s.id] / COLS_PER_ROW);
+    s.deps.forEach(depId => {{
+        const fromRow = Math.floor(phaseMemo[depId] / COLS_PER_ROW);
+        if (fromRow !== toRow) {{
+            const gapKey = Math.min(fromRow, toRow) + '-' + Math.max(fromRow, toRow);
+            crossRowArrows[gapKey] = (crossRowArrows[gapKey] || 0) + 1;
+        }}
+    }});
+}});
+
+// Pass 2: position with dynamic row gaps based on arrow count
 let totalW=0, totalH=0;
 const nodePositions = {{}};
 const rowY = {{}};
 let cumY = 0;
 for (let r = 0; r < numRows; r++) {{
     rowY[r] = cumY;
+    // Calculate gap after this row: base gap + space for cross-row arrows
+    let arrowCount = 0;
+    for (let r2 = r + 1; r2 < numRows; r2++) {{
+        const key = r + '-' + r2;
+        arrowCount += (crossRowArrows[key] || 0);
+    }}
+    // Only count arrows crossing directly from this row to next
+    const directKey = r + '-' + (r + 1);
+    const directArrows = crossRowArrows[directKey] || 0;
+    const rowGap = baseRowGap + directArrows * arrowLineSpacing;
     cumY += rowMaxH[r] + rowGap;
 }}
-totalH = cumY - rowGap;
+totalH = cumY;
 
 for (let p=0; p<=maxPhase; p++) {{
     const group = phaseGroups[p] || [];
@@ -254,6 +278,9 @@ svg.appendChild(defs);
 const stepMap = {{}};
 steps.forEach(s => stepMap[s.id] = s);
 
+// Track cross-row arrow index for even spacing in the gap
+const crossRowArrowIdx = {{}};
+
 steps.forEach(s => {{
     s.deps.forEach(depId => {{
         const from = nodePositions[depId];
@@ -274,11 +301,22 @@ steps.forEach(s => {{
             path.setAttribute('d', d);
         }} else {{
             const x1=from.cx+2, y1=from.cy, x2=to.lx-2, y2=to.ly;
-            const rightEdge = totalW + wrapMargin*0.7;
-            const leftEdge = wrapMargin*0.3;
-            const midY = (y1+y2)/2;
+            // Route through the gap between rows, spacing arrows evenly
+            const gapKey = fromRow + '-' + toRow;
+            if (!crossRowArrowIdx[gapKey]) crossRowArrowIdx[gapKey] = 0;
+            const idx = crossRowArrowIdx[gapKey]++;
+            const totalArrows = crossRowArrows[gapKey] || 1;
+            // Place arrows in the gap between fromRow bottom and toRow top
+            const gapTop = rowY[fromRow] + rowMaxH[fromRow];
+            const gapBottom = rowY[toRow];
+            const gapMid = gapTop + (gapBottom - gapTop) * (idx + 1) / (totalArrows + 1);
+            // Offset vertical segments horizontally so they don't overlap
+            const vSpacing = 6;
+            const vOffset = (idx - (totalArrows - 1) / 2) * vSpacing;
+            const rightEdge = totalW + wrapMargin*0.7 + vOffset;
+            const leftEdge = wrapMargin*0.3 + vOffset;
             path.setAttribute('d',
-                `M${{x1}},${{y1}} H${{rightEdge}} V${{midY}} H${{leftEdge}} V${{y2}} H${{x2}}`);
+                `M${{x1}},${{y1}} H${{rightEdge}} V${{gapMid}} H${{leftEdge}} V${{y2}} H${{x2}}`);
         }}
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', strokeColor);
