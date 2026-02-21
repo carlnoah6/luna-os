@@ -516,27 +516,8 @@ Report results to: {chat_id}
         else:
             plan = self.store.get_plan(plan.id)  # type: ignore[assignment]
             if plan:
-                still_pending = [s for s in plan.steps if s.status.value == "pending"]
                 still_running = [s for s in plan.steps if s.status.value == "running"]
                 if still_running:
-                    self._notify(plan.chat_id, format_plan(plan))
-                    self._send_plan_graph(plan)
-                elif still_pending:
-                    # Pending steps exist but none are ready — deps may include
-                    # failed steps or there is a dependency cycle.  Do NOT mark
-                    # the plan as completed; log a warning instead.
-                    logger.warning(
-                        "Plan %s has %d pending steps with unmet deps after step %d done "
-                        "(possible failed dependency or cycle)",
-                        plan.id,
-                        len(still_pending),
-                        step_num,
-                    )
-                    self._notify(
-                        plan.chat_id,
-                        f"⚠️ {len(still_pending)} pending step(s) cannot proceed "
-                        f"(dependencies not met). Check for failed steps.",
-                    )
                     self._notify(plan.chat_id, format_plan(plan))
                     self._send_plan_graph(plan)
                 else:
@@ -697,22 +678,10 @@ Report results to: {chat_id}
             else:
                 plan = self.store.get_plan(plan.id)  # type: ignore[assignment]
                 if plan:
-                    still_pending = [s for s in plan.steps if s.status.value == "pending"]
                     still_running = [s for s in plan.steps if s.status.value == "running"]
                     if still_running:
                         self._notify(plan.chat_id, format_plan(plan))
                         return {"advance": False, "still_running": len(still_running)}
-                    elif still_pending:
-                        logger.warning(
-                            "Plan %s has %d pending steps with unmet deps (advance)",
-                            plan.id,
-                            len(still_pending),
-                        )
-                        return {
-                            "advance": False,
-                            "reason": "pending steps with unmet deps",
-                            "pending": len(still_pending),
-                        }
                     else:
                         self.store.update_plan_status(plan.id, "completed")
                         plan = self.store.get_plan(plan.id)  # type: ignore[assignment]
@@ -874,10 +843,6 @@ Report results to: {chat_id}
         # Check stuck running steps
         stuck_steps = self._check_stuck_steps()
 
-        # Advance plans that have ready steps but nothing running
-        # (catches cases where _start_ready_steps previously failed due to full slots)
-        advanced = self._advance_idle_plans()
-
         result: dict[str, Any] = {"processed": processed}
         if expired_drafts:
             result["expired_drafts"] = expired_drafts
@@ -885,36 +850,7 @@ Report results to: {chat_id}
             result["stuck_steps_failed"] = stuck_steps
         if stale_paused:
             result["stale_paused"] = stale_paused
-        if advanced:
-            result["advanced_idle"] = advanced
         return result
-
-    def _advance_idle_plans(self) -> int:
-        """Try to start ready steps on active plans with no running steps.
-
-        This catches plans that got stuck because ``_start_ready_steps``
-        previously returned empty (e.g. concurrency slots were full).
-        """
-        advanced = 0
-        active_plans = self.store.list_plans(status="active")
-        for p in active_plans:
-            full = self.store.get_plan(p.id)
-            if not full:
-                continue
-            running = [s for s in full.steps if s.status.value == "running"]
-            if running:
-                continue  # already has work in progress
-            ready = self.store.ready_steps(full.id)
-            if not ready:
-                continue  # nothing to start
-            spawn_results = self._start_ready_steps(full, ready)
-            if spawn_results:
-                advanced += 1
-                full = self.store.get_plan(full.id)  # type: ignore[assignment]
-                if full:
-                    self._notify(full.chat_id, format_plan(full))
-                    self._send_plan_graph(full)
-        return advanced
 
     def _check_stuck_steps(self) -> int:
         """Find and fail stuck running steps whose agent has died."""
