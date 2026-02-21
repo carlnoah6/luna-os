@@ -108,7 +108,10 @@ svg.arrows {{ position: absolute; top: 0; left: 0; pointer-events: none; }}
 </div>
 <script>
 const steps = {steps_json};
-const statusIcons = {{pending:'', running:'\\u23f3', done:'\\u2705', failed:'\\u274c', waiting:'\\u270b'}};
+const statusIcons = {{
+    pending:'', running:'\\u23f3', done:'\\u2705',
+    failed:'\\u274c', waiting:'\\u270b'
+}};
 
 function getPhase(id, memo, visiting) {{
     if (memo[id] !== undefined) return memo[id];
