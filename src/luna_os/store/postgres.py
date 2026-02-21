@@ -322,6 +322,31 @@ class PostgresBackend(StorageBackend):
             or []
         )
 
+    def waiting_tasks(self) -> list[dict[str, Any]]:
+        """Return tasks in 'waiting' state as dicts."""
+        return (
+            self._execute(
+                "SELECT * FROM tasks WHERE status = 'waiting' ORDER BY waited_at",
+                fetch="all",
+            )
+            or []
+        )
+
+    def cost_by_plan(self, plan_id: str) -> list[dict[str, Any]]:
+        """Get cost breakdown for all completed tasks in a plan."""
+        return (
+            self._execute(
+                """SELECT t.id, t.description, t.input_tokens, t.output_tokens, t.cost_usd
+                   FROM tasks t
+                   JOIN plan_steps ps ON ps.task_id = t.id
+                   WHERE ps.plan_id = %s AND t.status = 'done'
+                   ORDER BY ps.step_num""",
+                (plan_id,),
+                fetch="all",
+            )
+            or []
+        )
+
     # -- Plans -----------------------------------------------------------------
 
     def create_plan(
