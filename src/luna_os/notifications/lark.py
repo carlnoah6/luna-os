@@ -5,6 +5,7 @@ Handles chat creation, messaging, card sending, image upload, and dashboard upda
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -405,15 +406,13 @@ class LarkProvider(NotificationProvider):
         )
         if not os.path.exists(script):
             return
-        try:
+        with contextlib.suppress(Exception):
             subprocess.Popen(
                 ["python3", script],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-        except Exception:
-            pass
 
     def update_group_title(self, chat_id: str) -> None:
         """Fire-and-forget group title update based on plan progress."""
@@ -445,12 +444,10 @@ class LarkProvider(NotificationProvider):
         )
         if not os.path.exists(script):
             return
-        try:
+        with contextlib.suppress(Exception):
             subprocess.Popen(
                 ["python3", script, "--chat-id", chat_id],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-        except Exception:
-            pass
