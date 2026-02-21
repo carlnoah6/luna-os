@@ -99,3 +99,11 @@ class NotificationProvider(ABC):
         Returns:
             True on success.
         """
+
+    # ── Optional hooks (default no-ops) ──────────────────────────
+
+    def update_dashboard(self, trigger: str = "unknown") -> None:
+        """Trigger dashboard refresh after state changes. Override to implement."""
+
+    def update_group_title(self, chat_id: str) -> None:
+        """Update group chat title to reflect plan progress. Override to implement."""
