@@ -615,8 +615,9 @@ Report results to: {chat_id}
 
         for i, ns in enumerate(new_steps):
             raw_deps = ns.get("depends_on") or []
-            deps = [d + next_num for d in raw_deps]
-            self.store.insert_step(plan.id, next_num + i, ns["title"], ns["prompt"], deps)
+            step_num = next_num + i
+            deps = [d + next_num for d in raw_deps if d + next_num != step_num]
+            self.store.insert_step(plan.id, step_num, ns["title"], ns["prompt"], deps)
 
         # Auto-advance if plan is active
         spawn_ok = False
