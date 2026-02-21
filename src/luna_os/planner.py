@@ -147,6 +147,11 @@ def format_plan(plan: Plan) -> str:
         elif st == "failed":
             result = _short_desc(s.result or "", 60)
             lines.append(f"  [failed] {num}. {title} {s.task_id or ''} -- {result}")
+        elif st == "waiting":
+            reason = _short_desc(s.result or "等待输入", 60)
+            dur = _format_duration(s.started_at)
+            dur_str = f" [{dur}]" if dur else ""
+            lines.append(f"  [⏸️ waiting] {num}. {title} {s.task_id or ''}{dur_str} -- {reason}")
         elif st == "cancelled":
             lines.append(f"  [cancelled] {num}. {title}")
         else:
