@@ -340,7 +340,7 @@ class PostgresBackend(StorageBackend):
         )
         for i, s in enumerate(steps, 1):
             raw_deps = s.get("depends_on") or []
-            deps = [d + 1 for d in raw_deps]
+            deps = [d + 1 for d in raw_deps if d + 1 != i]  # filter self-refs
             self._execute(
                 """INSERT INTO plan_steps (plan_id, step_num, title, prompt, status, depends_on)
                    VALUES (%s, %s, %s, %s, 'pending', %s)""",
@@ -563,10 +563,12 @@ class PostgresBackend(StorageBackend):
         prompt: str,
         depends_on: list[int] | None = None,
     ) -> None:
+        # Filter out self-referencing dependencies
+        clean_deps = [d for d in (depends_on or []) if d != step_num]
         self._execute(
             """INSERT INTO plan_steps (plan_id, step_num, title, prompt, status, depends_on)
                VALUES (%s, %s, %s, %s, 'pending', %s)""",
-            (plan_id, step_num, title, prompt, depends_on or []),
+            (plan_id, step_num, title, prompt, clean_deps),
         )
 
     # -- Events ----------------------------------------------------------------

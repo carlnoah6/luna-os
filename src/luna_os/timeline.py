@@ -18,10 +18,12 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
     """Convert a plan's steps into the data format needed for the timeline graph."""
     steps_data: list[dict[str, Any]] = []
     for s in plan.steps:
+        # Filter out self-referencing dependencies
+        deps = [d for d in (s.depends_on or []) if d != s.step_num]
         entry: dict[str, Any] = {
             "id": s.step_num,
             "title": s.title or f"Step {s.step_num}",
-            "deps": s.depends_on or [],
+            "deps": deps,
             "status": s.status.value if hasattr(s.status, "value") else str(s.status),
         }
         if s.task_id:
@@ -119,7 +121,9 @@ function getPhase(id, memo, visiting) {{
     visiting.add(id);
     const s = steps.find(s => s.id === id);
     if (!s || !s.deps.length) {{ memo[id] = 0; return 0; }}
-    memo[id] = Math.max(...s.deps.filter(d => d !== id).map(d => getPhase(d, memo, visiting))) + 1;
+    const validDeps = s.deps.filter(d => d !== id);
+    if (!validDeps.length) {{ memo[id] = 0; return 0; }}
+    memo[id] = Math.max(...validDeps.map(d => getPhase(d, memo, visiting))) + 1;
     return memo[id];
 }}
 const phaseMemo = {{}};
