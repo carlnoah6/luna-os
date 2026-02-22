@@ -216,6 +216,7 @@ class MemoryBackend(StorageBackend):
                     status=StepStatus.PENDING,
                     depends_on=deps,
                     timeout_minutes=s.get("timeout_minutes"),
+                    model=s.get("model"),
                 )
             )
         plan = Plan(
@@ -355,6 +356,7 @@ class MemoryBackend(StorageBackend):
         prompt: str,
         depends_on: list[int] | None = None,
         timeout_minutes: int | None = None,
+        model: str | None = None,
     ) -> None:
         plan = self._plans.get(plan_id)
         if plan:
@@ -367,6 +369,7 @@ class MemoryBackend(StorageBackend):
                     status=StepStatus.PENDING,
                     depends_on=depends_on or [],
                     timeout_minutes=timeout_minutes,
+                    model=model,
                 )
             )
 
