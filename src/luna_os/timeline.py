@@ -21,7 +21,7 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
         # Filter out self-referencing dependencies
         deps = [d for d in (s.depends_on or []) if d != s.step_num]
         raw_title = s.title or f"Step {s.step_num}"
-        title = raw_title[:50] + ("…" if len(raw_title) > 50 else "")
+        title = raw_title[:50] + ("\u2026" if len(raw_title) > 50 else "")
         entry: dict[str, Any] = {
             "id": s.step_num,
             "title": title,
@@ -121,6 +121,9 @@ body {{
     color: #666; padding: 2px 10px; border-radius: 10px; background: #eee;
 }}
 .phase-tag {{ position: absolute; font-size: 9px; color: #999; }}
+.section-divider {{
+    position: absolute; border-top: 1px dashed #ddd; width: 100%;
+}}
 svg.arrows {{ position: absolute; top: 0; left: 0; pointer-events: none; }}
 </style>
 </head>
@@ -137,46 +140,62 @@ const statusIcons = {{
     failed:'\\u274c', waiting:'\\u270b'
 }};
 
+// --- Identify independent vs phased steps ---
+const dependedOn = new Set();
+steps.forEach(s => s.deps.forEach(d => dependedOn.add(d)));
+const independent = steps.filter(
+    s => s.deps.length === 0 && !dependedOn.has(s.id)
+);
+const phased = steps.filter(
+    s => s.deps.length > 0 || dependedOn.has(s.id)
+);
+
+// --- Phase calculation (only for phased steps) ---
 function getPhase(id, memo, visiting) {{
     if (memo[id] !== undefined) return memo[id];
     if (visiting.has(id)) {{ memo[id] = 0; return 0; }}
     visiting.add(id);
-    const s = steps.find(s => s.id === id);
+    const s = phased.find(s => s.id === id);
     if (!s || !s.deps.length) {{ memo[id] = 0; return 0; }}
     const validDeps = s.deps.filter(d => d !== id);
     if (!validDeps.length) {{ memo[id] = 0; return 0; }}
-    memo[id] = Math.max(...validDeps.map(d => getPhase(d, memo, visiting))) + 1;
+    memo[id] = Math.max(
+        ...validDeps.map(d => getPhase(d, memo, visiting))
+    ) + 1;
     return memo[id];
 }}
 const phaseMemo = {{}};
-steps.forEach(s => getPhase(s.id, phaseMemo, new Set()));
+phased.forEach(s => getPhase(s.id, phaseMemo, new Set()));
 
-const maxPhase = Math.max(...Object.values(phaseMemo));
+const maxPhase = phased.length > 0
+    ? Math.max(...phased.map(s => phaseMemo[s.id] || 0)) : -1;
 const phaseGroups = {{}};
-steps.forEach(s => {{
-    const p = phaseMemo[s.id];
+phased.forEach(s => {{
+    const p = phaseMemo[s.id] || 0;
     if (!phaseGroups[p]) phaseGroups[p] = [];
     phaseGroups[p].push(s);
 }});
 
-const nodeW=200, gapY=10, phaseGap=90, labelH=36;
-const COLS_PER_ROW=3, svgPad=60, wrapMargin=30, topPad=60;
-const arrowLineSpacing=8, baseRowGap=30;
+const nodeW = 200, gapY = 10, phaseGap = 90, labelH = 36;
+const COLS_PER_ROW = 3, svgPad = 60, wrapMargin = 30, topPad = 60;
+const arrowLineSpacing = 8, baseRowGap = 30;
 const graph = document.getElementById('graph');
 
-// Pass 1: create nodes off-screen to measure actual heights
+// --- Pass 1: create nodes off-screen to measure heights ---
 const nodeElements = {{}};
 const measuredH = {{}};
 
 steps.forEach(s => {{
     const el = document.createElement('div');
     el.className = `node ${{s.status}}`;
-    el.style.cssText = `position:absolute; left:-9999px; top:0; width:${{nodeW}}px;`;
+    el.style.cssText = `position:absolute;left:-9999px;top:0;width:${{nodeW}}px;`;
     const icon = statusIcons[s.status] || '';
-    const tid = s.tid ? `<span class="node-tid">${{s.tid}}</span>` : '';
+    const tid = s.tid
+        ? `<span class="node-tid">${{s.tid}}</span>` : '';
     const dur = (s.status === 'running' && s.duration)
         ? `<span class="node-duration">\\u23f1${{s.duration}}</span>` : '';
-    const meta = (tid || dur) ? `<div class="node-meta">${{tid}}${{dur}}</div>` : '';
+    const meta = (tid || dur)
+        ? `<div class="node-meta">${{tid}}${{dur}}</div>` : '';
     el.innerHTML = `
         <div class="node-icon">S${{s.id}}</div>
         <div class="node-body">
@@ -188,118 +207,177 @@ steps.forEach(s => {{
     graph.appendChild(el);
     nodeElements[s.id] = el;
 }});
-
 steps.forEach(s => {{ measuredH[s.id] = nodeElements[s.id].offsetHeight; }});
 
-function getColHeight(group) {{
-    let h = labelH;
-    group.forEach((s, i) => {{ h += measuredH[s.id] + (i > 0 ? gapY : 0); }});
-    return h;
-}}
-
-const numRows = Math.floor(maxPhase / COLS_PER_ROW) + 1;
-const rowMaxH = {{}};
-for (let r = 0; r < numRows; r++) {{
-    let maxH = 0;
-    for (let c = 0; c < COLS_PER_ROW; c++) {{
-        const p = r * COLS_PER_ROW + c;
-        if (p > maxPhase) break;
-        maxH = Math.max(maxH, getColHeight(phaseGroups[p] || []));
-    }}
-    rowMaxH[r] = maxH;
-}}
-
-// Count cross-row arrows between consecutive rows to size gaps dynamically
-const crossRowArrows = {{}};
-steps.forEach(s => {{
-    const toRow = Math.floor(phaseMemo[s.id] / COLS_PER_ROW);
-    s.deps.forEach(depId => {{
-        const fromRow = Math.floor(phaseMemo[depId] / COLS_PER_ROW);
-        if (fromRow !== toRow) {{
-            const gapKey = Math.min(fromRow, toRow) + '-' + Math.max(fromRow, toRow);
-            crossRowArrows[gapKey] = (crossRowArrows[gapKey] || 0) + 1;
-        }}
-    }});
-}});
-
-// Pass 2: position with dynamic row gaps based on arrow count
-let totalW=0, totalH=0;
+// --- Layout independent steps at the top ---
 const nodePositions = {{}};
-const rowY = {{}};
-let cumY = topPad;
-for (let r = 0; r < numRows; r++) {{
-    rowY[r] = cumY;
-    // Calculate gap after this row: base gap + space for cross-row arrows
-    let arrowCount = 0;
-    for (let r2 = r + 1; r2 < numRows; r2++) {{
-        const key = r + '-' + r2;
-        arrowCount += (crossRowArrows[key] || 0);
-    }}
-    // Only count arrows crossing directly from this row to next
-    const directKey = r + '-' + (r + 1);
-    const directArrows = crossRowArrows[directKey] || 0;
-    const rowGap = baseRowGap + directArrows * arrowLineSpacing;
-    cumY += rowMaxH[r] + rowGap;
-}}
-totalH = cumY;
+let totalW = 0, totalH = 0;
+let phasedStartY = topPad;
 
-for (let p=0; p<=maxPhase; p++) {{
-    const group = phaseGroups[p] || [];
-    const row = Math.floor(p / COLS_PER_ROW);
-    const colInRow = p % COLS_PER_ROW;
-    const colX = wrapMargin + colInRow * (nodeW + phaseGap);
-    const baseY = rowY[row];
-    const thisColH = getColHeight(group);
-    const maxH = rowMaxH[row];
-    const offsetY = (maxH - thisColH) / 2;
+if (independent.length > 0) {{
+    const secLabel = document.createElement('div');
+    secLabel.className = 'phase-label';
+    secLabel.style.cssText = `left:${{wrapMargin}}px;top:${{topPad}}px;`;
+    secLabel.textContent = 'Independent';
+    graph.appendChild(secLabel);
 
-    const lbl = document.createElement('div');
-    lbl.className = 'phase-label';
-    lbl.style.cssText = `left:${{colX}}px; top:${{baseY + offsetY}}px;`;
-    lbl.textContent = `Phase ${{p + 1}}`;
-    graph.appendChild(lbl);
+    const secTag = document.createElement('div');
+    secTag.className = 'phase-tag';
+    secTag.style.cssText = `left:${{wrapMargin + 80}}px;top:${{topPad + 2}}px;`;
+    secTag.textContent = 'no dependencies';
+    graph.appendChild(secTag);
 
-    const tag = document.createElement('div');
-    tag.className = 'phase-tag';
-    tag.style.cssText = `left:${{colX + 62}}px; top:${{baseY + offsetY + 2}}px;`;
-    tag.textContent = group.length > 1 ? 'parallel' : (p > 0 ? 'sequential' : '');
-    graph.appendChild(tag);
-
-    let curY = baseY + offsetY + labelH;
-    group.forEach((s, i) => {{
+    let curX = wrapMargin, curY = topPad + labelH;
+    let rowH = 0, col = 0;
+    independent.forEach(s => {{
+        if (col >= COLS_PER_ROW) {{
+            curX = wrapMargin;
+            curY += rowH + gapY;
+            rowH = 0;
+            col = 0;
+        }}
         const h = measuredH[s.id];
         const el = nodeElements[s.id];
-        el.style.cssText = `position:absolute; left:${{colX}}px;`
-            + ` top:${{curY}}px; width:${{nodeW}}px;`;
+        el.style.cssText = `position:absolute;left:${{curX}}px;`
+            + `top:${{curY}}px;width:${{nodeW}}px;`;
         nodePositions[s.id] = {{
-            cx: colX + nodeW, cy: curY + h / 2,
-            lx: colX, ly: curY + h / 2,
+            cx: curX + nodeW, cy: curY + h / 2,
+            lx: curX, ly: curY + h / 2,
             top: curY, bottom: curY + h,
-            midX: colX + nodeW / 2,
-            phase: phaseMemo[s.id],
+            midX: curX + nodeW / 2, phase: -1,
         }};
-        curY += h + gapY;
+        rowH = Math.max(rowH, h);
+        totalW = Math.max(totalW, curX + nodeW);
+        curX += nodeW + 16;
+        col++;
     }});
-    totalW = Math.max(totalW, colX + nodeW);
+    phasedStartY = curY + rowH + baseRowGap + 10;
+
+    // Divider line
+    if (phased.length > 0) {{
+        const div = document.createElement('div');
+        div.className = 'section-divider';
+        div.style.cssText = `top:${{phasedStartY - 15}}px;`
+            + `width:${{totalW + wrapMargin}}px;left:${{wrapMargin}}px;`;
+        graph.appendChild(div);
+    }}
+}}
+
+// --- Layout phased steps ---
+if (phased.length > 0) {{
+    function getColHeight(group) {{
+        let h = labelH;
+        group.forEach((s, i) => {{
+            h += measuredH[s.id] + (i > 0 ? gapY : 0);
+        }});
+        return h;
+    }}
+
+    const numRows = Math.floor(maxPhase / COLS_PER_ROW) + 1;
+    const rowMaxH = {{}};
+    for (let r = 0; r < numRows; r++) {{
+        let maxH = 0;
+        for (let c = 0; c < COLS_PER_ROW; c++) {{
+            const p = r * COLS_PER_ROW + c;
+            if (p > maxPhase) break;
+            maxH = Math.max(maxH, getColHeight(phaseGroups[p] || []));
+        }}
+        rowMaxH[r] = maxH;
+    }}
+
+    const crossRowArrows = {{}};
+    phased.forEach(s => {{
+        const toRow = Math.floor((phaseMemo[s.id] || 0) / COLS_PER_ROW);
+        s.deps.forEach(depId => {{
+            const fromRow = Math.floor(
+                (phaseMemo[depId] || 0) / COLS_PER_ROW
+            );
+            if (fromRow !== toRow) {{
+                const gapKey = Math.min(fromRow, toRow)
+                    + '-' + Math.max(fromRow, toRow);
+                crossRowArrows[gapKey] =
+                    (crossRowArrows[gapKey] || 0) + 1;
+            }}
+        }});
+    }});
+
+    const rowY = {{}};
+    let cumY = phasedStartY;
+    for (let r = 0; r < numRows; r++) {{
+        rowY[r] = cumY;
+        const directKey = r + '-' + (r + 1);
+        const directArrows = crossRowArrows[directKey] || 0;
+        const rowGap = baseRowGap + directArrows * arrowLineSpacing;
+        cumY += rowMaxH[r] + rowGap;
+    }}
+    totalH = Math.max(totalH, cumY);
+
+    for (let p = 0; p <= maxPhase; p++) {{
+        const group = phaseGroups[p] || [];
+        const row = Math.floor(p / COLS_PER_ROW);
+        const colInRow = p % COLS_PER_ROW;
+        const colX = wrapMargin + colInRow * (nodeW + phaseGap);
+        const baseY = rowY[row];
+        const thisColH = getColHeight(group);
+        const maxH = rowMaxH[row];
+        const offsetY = (maxH - thisColH) / 2;
+
+        const lbl = document.createElement('div');
+        lbl.className = 'phase-label';
+        lbl.style.cssText = `left:${{colX}}px;top:${{baseY + offsetY}}px;`;
+        lbl.textContent = `Phase ${{p + 1}}`;
+        graph.appendChild(lbl);
+
+        const tag = document.createElement('div');
+        tag.className = 'phase-tag';
+        tag.style.cssText =
+            `left:${{colX + 62}}px;top:${{baseY + offsetY + 2}}px;`;
+        tag.textContent = group.length > 1
+            ? 'parallel' : (p > 0 ? 'sequential' : '');
+        graph.appendChild(tag);
+
+        let curY = baseY + offsetY + labelH;
+        group.forEach(s => {{
+            const h = measuredH[s.id];
+            const el = nodeElements[s.id];
+            el.style.cssText = `position:absolute;left:${{colX}}px;`
+                + `top:${{curY}}px;width:${{nodeW}}px;`;
+            nodePositions[s.id] = {{
+                cx: colX + nodeW, cy: curY + h / 2,
+                lx: colX, ly: curY + h / 2,
+                top: curY, bottom: curY + h,
+                midX: colX + nodeW / 2,
+                phase: phaseMemo[s.id],
+            }};
+            curY += h + gapY;
+        }});
+        totalW = Math.max(totalW, colX + nodeW);
+    }}
 }}
 
 graph.style.width = (totalW + wrapMargin + svgPad) + 'px';
 graph.style.height = (totalH + svgPad + topPad) + 'px';
 
+// --- Draw arrows ---
 const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 svg.setAttribute('class', 'arrows');
 svg.setAttribute('width', totalW + wrapMargin + svgPad);
 svg.setAttribute('height', totalH + svgPad + topPad);
 
 const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-
 function makeMarker(id, fill) {{
-    const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    const m = document.createElementNS(
+        'http://www.w3.org/2000/svg', 'marker'
+    );
     m.setAttribute('id', id);
-    m.setAttribute('markerWidth', '8'); m.setAttribute('markerHeight', '6');
-    m.setAttribute('refX', '8'); m.setAttribute('refY', '3');
+    m.setAttribute('markerWidth', '8');
+    m.setAttribute('markerHeight', '6');
+    m.setAttribute('refX', '8');
+    m.setAttribute('refY', '3');
     m.setAttribute('orient', 'auto');
-    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    const poly = document.createElementNS(
+        'http://www.w3.org/2000/svg', 'polygon'
+    );
     poly.setAttribute('points', '0 0, 8 3, 0 6');
     poly.setAttribute('fill', fill);
     m.appendChild(poly);
@@ -311,11 +389,7 @@ svg.appendChild(defs);
 
 const stepMap = {{}};
 steps.forEach(s => stepMap[s.id] = s);
-
-// Track cross-row arrow index for even spacing in the gap
 const crossRowArrowIdx = {{}};
-
-// Collect all node bounding boxes for obstruction detection
 const allNodeBoxes = [];
 steps.forEach(s => {{
     const pos = nodePositions[s.id];
@@ -326,9 +400,7 @@ steps.forEach(s => {{
     }});
 }});
 
-// Track bypass arrow indices for above/below spacing
-let bypassAboveIdx = 0;
-let bypassBelowIdx = 0;
+let bypassAboveIdx = 0, bypassBelowIdx = 0;
 
 steps.forEach(s => {{
     s.deps.forEach(depId => {{
@@ -339,66 +411,63 @@ steps.forEach(s => {{
         const isDone = depStep && depStep.status === 'done';
         const strokeColor = isDone ? '#4CAF50' : '#ddd';
         const strokeWidth = isDone ? '2' : '1.5';
-        const markerEnd = isDone ? 'url(#arrowhead-done)' : 'url(#arrowhead)';
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        const fromRow = Math.floor(phaseMemo[depId] / COLS_PER_ROW);
-        const toRow = Math.floor(phaseMemo[s.id] / COLS_PER_ROW);
-        if (fromRow === toRow) {{
-            // Check if any intermediate nodes are in the way
-            const fromPhase = phaseMemo[depId];
-            const toPhase = phaseMemo[s.id];
+        const markerEnd = isDone
+            ? 'url(#arrowhead-done)' : 'url(#arrowhead)';
+        const path = document.createElementNS(
+            'http://www.w3.org/2000/svg', 'path'
+        );
+        const fromPhase = from.phase;
+        const toPhase = to.phase;
+        const fromRow = fromPhase >= 0
+            ? Math.floor(fromPhase / COLS_PER_ROW) : -1;
+        const toRow = toPhase >= 0
+            ? Math.floor(toPhase / COLS_PER_ROW) : -1;
+
+        if (fromRow === toRow && fromRow >= 0) {{
             const intermediateNodes = allNodeBoxes.filter(n =>
                 n.phase > fromPhase && n.phase < toPhase
                 && Math.floor(n.phase / COLS_PER_ROW) === fromRow
             );
+            const x1 = from.cx + 2, y1 = from.cy;
+            const x2 = to.lx - 2, y2 = to.ly;
             if (intermediateNodes.length === 0) {{
-                // Direct bezier — no obstruction
-                const x1=from.cx+2, y1=from.cy, x2=to.lx-2, y2=to.ly;
-                const midX = (x1+x2)/2;
+                const midX = (x1 + x2) / 2;
                 path.setAttribute('d',
-                    `M${{x1}},${{y1}} C${{midX}},${{y1}} ${{midX}},${{y2}} ${{x2}},${{y2}}`);
+                    `M${{x1}},${{y1}} C${{midX}},${{y1}} `
+                    + `${{midX}},${{y2}} ${{x2}},${{y2}}`);
             }} else {{
-                // Bypass arc — route above or below based on node position
-                const x1 = from.cx + 2, y1 = from.cy;
-                const x2 = to.lx - 2, y2 = to.ly;
                 const bypassSpacing = 18;
-                // Determine direction: compare source node Y to row center
-                const rCenter = rowY[fromRow] + rowMaxH[fromRow] / 2;
+                const rCenter = (from.top + to.bottom) / 2;
                 const avgY = (from.cy + to.ly) / 2;
                 if (avgY <= rCenter) {{
-                    // Arc above
-                    const minTop = Math.min(...intermediateNodes.map(n => n.top));
-                    const arcY = minTop - 35 - bypassAboveIdx * bypassSpacing;
+                    const minTop = Math.min(
+                        ...intermediateNodes.map(n => n.top)
+                    );
+                    const arcY = minTop - 35
+                        - bypassAboveIdx * bypassSpacing;
                     bypassAboveIdx++;
                     path.setAttribute('d',
-                        `M${{x1}},${{y1}} C${{x1}},${{arcY}} ${{x2}},${{arcY}} ${{x2}},${{y2}}`);
+                        `M${{x1}},${{y1}} C${{x1}},${{arcY}} `
+                        + `${{x2}},${{arcY}} ${{x2}},${{y2}}`);
                 }} else {{
-                    // Arc below
-                    const maxBot = Math.max(...intermediateNodes.map(n => n.bottom));
-                    const arcY = maxBot + 35 + bypassBelowIdx * bypassSpacing;
+                    const maxBot = Math.max(
+                        ...intermediateNodes.map(n => n.bottom)
+                    );
+                    const arcY = maxBot + 35
+                        + bypassBelowIdx * bypassSpacing;
                     bypassBelowIdx++;
                     path.setAttribute('d',
-                        `M${{x1}},${{y1}} C${{x1}},${{arcY}} ${{x2}},${{arcY}} ${{x2}},${{y2}}`);
+                        `M${{x1}},${{y1}} C${{x1}},${{arcY}} `
+                        + `${{x2}},${{arcY}} ${{x2}},${{y2}}`);
                 }}
             }}
         }} else {{
-            const x1=from.cx+2, y1=from.cy, x2=to.lx-2, y2=to.ly;
-            // Route through the gap between rows, spacing arrows evenly
-            const gapKey = fromRow + '-' + toRow;
-            if (!crossRowArrowIdx[gapKey]) crossRowArrowIdx[gapKey] = 0;
-            const idx = crossRowArrowIdx[gapKey]++;
-            const totalArrows = crossRowArrows[gapKey] || 1;
-            // Place arrows in the gap between fromRow bottom and toRow top
-            const gapTop = rowY[fromRow] + rowMaxH[fromRow];
-            const gapBottom = rowY[toRow];
-            const gapMid = gapTop + (gapBottom - gapTop) * (idx + 1) / (totalArrows + 1);
-            // Offset vertical segments horizontally so they don't overlap
-            const vSpacing = 6;
-            const vOffset = (idx - (totalArrows - 1) / 2) * vSpacing;
-            const rightEdge = totalW + wrapMargin*0.7 + vOffset;
-            const leftEdge = wrapMargin*0.3 + vOffset;
+            const x1 = from.cx + 2, y1 = from.cy;
+            const x2 = to.lx - 2, y2 = to.ly;
+            const midX = (x1 + x2) / 2;
             path.setAttribute('d',
-                `M${{x1}},${{y1}} H${{rightEdge}} V${{gapMid}} H${{leftEdge}} V${{y2}} H${{x2}}`);
+                `M${{x1}},${{y1}} C${{midX}},${{y1}} `
+                + `${{midX}},${{y2}} ${{x2}},${{y2}}`);
         }}
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', strokeColor);
@@ -428,7 +497,10 @@ def render_png(html_content: str, output_path: str) -> str:
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(args=["--no-sandbox"])
-            page = browser.new_page(viewport={"width": 1100, "height": 600}, device_scale_factor=2)
+            page = browser.new_page(
+                viewport={"width": 1100, "height": 600},
+                device_scale_factor=2,
+            )
             page.goto(f"file://{html_file}")
             page.wait_for_timeout(300)
             dims = page.evaluate(
