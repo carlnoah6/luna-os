@@ -6,11 +6,57 @@ via the event queue, and utility functions for event processing.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 from luna_os.store.base import StorageBackend
 from luna_os.types import Event
+
+logger = logging.getLogger(__name__)
+
+
+def _extract_session_cost(
+    session_key: str,
+) -> tuple[int, int, float]:
+    """Extract total token usage from an agent session's jsonl file.
+
+    Returns ``(input_tokens, output_tokens, cost_usd)``.
+    Returns ``(0, 0, 0.0)`` if the file cannot be read.
+    """
+    sessions_dir = os.environ.get(
+        "OPENCLAW_SESSIONS_DIR",
+        str(Path.home() / ".openclaw" / "agents" / "main" / "sessions"),
+    )
+    safe_key = Path(session_key).name
+    if safe_key != session_key or ".." in session_key:
+        return 0, 0, 0.0
+
+    jsonl_path = Path(sessions_dir) / f"{safe_key}.jsonl"
+    if not jsonl_path.exists():
+        return 0, 0, 0.0
+
+    total_in = total_out = 0
+    total_cost = 0.0
+    try:
+        with open(jsonl_path) as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                    usage = obj.get("message", {}).get("usage", {})
+                    if usage:
+                        total_in += usage.get("input", 0)
+                        total_out += usage.get("output", 0)
+                        cost = usage.get("cost", {})
+                        total_cost += cost.get("total", 0)
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+    except OSError as exc:
+        logger.debug("Could not read session file %s: %s", jsonl_path, exc)
+
+    return total_in, total_out, total_cost
 
 
 class ContractHelper:
@@ -62,6 +108,7 @@ class ContractHelper:
 
     def done(self, result: str, succeeded: int = 0, failed: int = 0) -> None:
         """Emit ``contract.done`` event. Planner will auto-advance."""
+        self._update_task_cost()
         self.store.emit_event(
             "contract.done",
             task_id=self.task_id,
@@ -80,12 +127,22 @@ class ContractHelper:
 
     def fail(self, error: str) -> None:
         """Emit ``contract.fail`` event."""
+        self._update_task_cost()
         self.store.emit_event(
             "contract.fail",
             task_id=self.task_id,
             step_num=self.step_id,
             payload={"error": error},
         )
+
+    def _update_task_cost(self) -> None:
+        """Extract token usage from the agent session and update the task."""
+        task = self.store.get_task(self.task_id)
+        if not task or not task.session_key:
+            return
+        inp, out, cost = _extract_session_cost(task.session_key)
+        if inp or out or cost:
+            self.store.update_task_cost(self.task_id, inp, out, cost)
 
 
 def resolve_plan_for_task(store: StorageBackend, task_id: str) -> tuple[str | None, int | None]:

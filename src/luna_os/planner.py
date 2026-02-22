@@ -1245,6 +1245,19 @@ Report results to: {chat_id}
                     if existing and existing.task_id:
                         task = self.store.get_task(existing.task_id)
                         if task and task.status.value != "failed":
+                            # Extract token costs before failing
+                            if task.session_key:
+                                from luna_os.events import (
+                                    _extract_session_cost,
+                                )
+
+                                inp, out, cost = _extract_session_cost(
+                                    task.session_key,
+                                )
+                                if inp or out or cost:
+                                    self.store.update_task_cost(
+                                        existing.task_id, inp, out, cost,
+                                    )
                             self.store.fail_task(existing.task_id, fail_reason)
                     updated_plan = self.store.get_plan(full.id)
                     if updated_plan:
