@@ -576,16 +576,27 @@ Report progress at each key milestone.
 ## Task ID
 {task_id}
 
-## Reporting (MANDATORY — do this BEFORE your final reply)
-When done, run:
+## Reporting (REQUIRED - your session will be considered FAILED if you don't run this)
+
+**You MUST call one of these commands as your FINAL action. The plan cannot advance without it.**
+
+### Success case:
 ```bash
-cd /home/ubuntu/.openclaw/workspace && python3 scripts/emit_event.py step.done --task-id {task_id} --result "your one-line result summary"
+cd /home/ubuntu/.openclaw/workspace && python3 scripts/emit_event.py step.done --task-id {task_id} --result "one-line result"
 ```
-On failure, run:
+Example: `python3 scripts/emit_event.py step.done --task-id tid-0222-59 --result "北京天气：晴，16°C"`
+
+### Failure case (if you cannot complete the task):
 ```bash
 cd /home/ubuntu/.openclaw/workspace && python3 scripts/emit_event.py step.failed --task-id {task_id} --result "error description"
 ```
-You MUST execute one of these commands. Without it, the plan cannot advance.
+Example: `python3 scripts/emit_event.py step.failed --task-id tid-0222-59 --result "API rate limit exceeded"`
+
+### Waiting for user input case:
+```bash
+cd /home/ubuntu/.openclaw/workspace && python3 scripts/emit_event.py step.waiting --task-id {task_id} --result "your question"
+```
+Example: `python3 scripts/emit_event.py step.waiting --task-id tid-0222-59 --result "请提供 API Key"`
 {task_chat_section}
 ## Parent Chat
 Report results to: {chat_id}
@@ -686,6 +697,14 @@ Report results to: {chat_id}
                     plan, "step_spawn_failed",
                     f"❌ Step {step.step_num} spawn failed: {step.title[:60]}",
                 )
+
+        # Send updated plan graph to main chat after state changes
+        if results:
+            plan_fresh = self.store.get_plan(plan.id)
+            if plan_fresh:
+                self._notify(plan_fresh.chat_id, format_plan(plan_fresh))
+                self._send_plan_graph(plan_fresh)
+
         return results
 
     # -- Plan commands ---------------------------------------------------------
@@ -914,6 +933,47 @@ Report results to: {chat_id}
 
         return {"step_failed": step_num, "error": error[:100]}
 
+    def step_waiting(self, chat_id: str, step_num: int, question: str) -> dict[str, Any]:
+        """Mark a step as waiting for user input.
+
+        The agent emits ``step.waiting`` when it needs information from the
+        user before it can continue.  The step is paused until the user
+        provides the answer and ``step_resume`` is called.
+        """
+        plan = self.store.get_plan_by_chat(chat_id, status_filter="active")
+        if not plan:
+            raise KeyError(f"No active plan found for {chat_id}")
+
+        existing = self.store.get_step(plan.id, step_num)
+        if existing and existing.status.value == "waiting":
+            return {"step_already_waiting": step_num}
+
+        self.store.wait_step(plan.id, step_num, question)
+
+        step = self.store.get_step(plan.id, step_num)
+        if step and step.task_id:
+            task = self.store.get_task(step.task_id)
+            if task:
+                self.store.wait_task(step.task_id, "user_input", question)
+
+        # Notify main chat with question + updated graph
+        self._notify(
+            plan.chat_id,
+            f"⏸️ Step {step_num} 需要你的输入:\n{_short_desc(question, 300)}",
+        )
+        plan = self.store.get_plan(plan.id)  # type: ignore[assignment]
+        if plan:
+            self._send_plan_graph(plan)
+
+        self._notify_main_session(
+            plan, "step_waiting",
+            f"⏸️ Step {step_num} waiting: {_short_desc(question, 120)}",
+        )
+
+        self._update_dashboard("step_waiting")
+
+        return {"step_waiting": step_num, "question": question[:200]}
+
     def replan(
         self,
         chat_id: str,
@@ -932,16 +992,27 @@ Report results to: {chat_id}
         if append:
             next_num = max((s.step_num for s in plan.steps), default=0) + 1
             kept_count = len(plan.steps)
+            # Auto-dependency: new steps depend on the last step in the plan
+            auto_deps = [next_num - 1] if plan.steps else []
         else:
             kept = [s for s in plan.steps if s.status.value in ("done", "running", "failed")]
             next_num = max((s.step_num for s in kept), default=0) + 1
             kept_count = len(kept)
+            # Auto-dependency: new steps depend on the last completed/running/failed step
+            auto_deps = [next_num - 1] if kept else []
             self.store.delete_pending_steps(plan.id)
 
         for i, ns in enumerate(new_steps):
             raw_deps = ns.get("depends_on") or []
             step_num = next_num + i
-            deps = [d + next_num for d in raw_deps if d + next_num != step_num]
+            if raw_deps:
+                # User-provided deps are relative (0-based within new steps), convert to absolute
+                deps = [d + next_num for d in raw_deps if d + next_num != step_num]
+            elif auto_deps:
+                # Auto-deps are already absolute step numbers
+                deps = list(auto_deps)
+            else:
+                deps = []
             self.store.insert_step(plan.id, step_num, ns["title"], ns["prompt"], deps)
 
         # Auto-advance if plan is active
@@ -1136,6 +1207,9 @@ Report results to: {chat_id}
             ),
             on_step_fail=lambda plan, step_num, error: self.step_fail(
                 plan.chat_id, step_num, error
+            ),
+            on_step_waiting=lambda plan, step_num, question: self.step_waiting(
+                plan.chat_id, step_num, question
             ),
         )
 
