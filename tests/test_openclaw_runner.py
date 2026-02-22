@@ -40,15 +40,17 @@ class TestOpenClawRunnerSpawn:
     def test_spawn_with_reply_chat_id(self):
         runner = OpenClawRunner()
 
-        with patch("subprocess.Popen") as mock_popen:
+        with patch("subprocess.Popen") as mock_popen, \
+             patch.object(runner, "_start_bridge") as mock_bridge:
             mock_popen.return_value = MagicMock(pid=12345)
             runner.spawn(
                 "t2", "prompt", "label",
                 reply_chat_id="oc_abc123",
             )
 
-        # Bridge should be started (2 Popen calls: bridge + agent)
-        assert mock_popen.call_count == 2
+        # Bridge started + agent spawned
+        mock_bridge.assert_called_once_with("label", "oc_abc123", "t2")
+        mock_popen.assert_called_once()
 
     def test_spawn_without_reply_chat_id(self):
         runner = OpenClawRunner()
