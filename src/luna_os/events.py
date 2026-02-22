@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,10 @@ def _extract_session_cost(
 ) -> tuple[int, int, float]:
     """Extract total token usage from an agent session's jsonl file.
 
+    Supports both direct filename keys (``task-xxx``) and Gateway
+    session keys (``agent:main:subagent:task-xxx``). For Gateway keys,
+    resolves the UUID via ``openclaw sessions --json``.
+
     Returns ``(input_tokens, output_tokens, cost_usd)``.
     Returns ``(0, 0, 0.0)`` if the file cannot be read.
     """
@@ -30,12 +35,9 @@ def _extract_session_cost(
         "OPENCLAW_SESSIONS_DIR",
         str(Path.home() / ".openclaw" / "agents" / "main" / "sessions"),
     )
-    safe_key = Path(session_key).name
-    if safe_key != session_key or ".." in session_key:
-        return 0, 0, 0.0
 
-    jsonl_path = Path(sessions_dir) / f"{safe_key}.jsonl"
-    if not jsonl_path.exists():
+    jsonl_path = _resolve_session_file(session_key, sessions_dir)
+    if not jsonl_path or not jsonl_path.exists():
         return 0, 0, 0.0
 
     total_in = total_out = 0
@@ -57,6 +59,53 @@ def _extract_session_cost(
         logger.debug("Could not read session file %s: %s", jsonl_path, exc)
 
     return total_in, total_out, total_cost
+
+
+def _resolve_session_file(
+    session_key: str, sessions_dir: str,
+) -> Path | None:
+    """Resolve a session key to its .jsonl file path.
+
+    Tries: (1) direct filename, (2) short key from colon-separated key,
+    (3) ``openclaw sessions --json`` lookup for UUID.
+    """
+    base_dir = Path(sessions_dir)
+
+    # Method 1: direct filename (e.g. "task-xxx")
+    safe_key = Path(session_key).name
+    if safe_key == session_key and ".." not in session_key:
+        candidate = base_dir / f"{safe_key}.jsonl"
+        if candidate.exists():
+            return candidate
+
+    # Method 2: extract short key from Gateway format
+    # "agent:main:subagent:task-xxx" → "task-xxx"
+    if ":" in session_key:
+        short_key = session_key.rsplit(":", 1)[-1]
+        candidate = base_dir / f"{short_key}.jsonl"
+        if candidate.exists():
+            return candidate
+
+    # Method 3: resolve via openclaw sessions list
+    try:
+        result = subprocess.run(
+            ["openclaw", "sessions", "--active", "60", "--json"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout)
+            sessions = data if isinstance(data, list) else data.get("sessions", [])
+            for s in sessions:
+                key = s.get("key", "")
+                sid = s.get("sessionId", s.get("id", ""))
+                if session_key in key and sid:
+                    candidate = base_dir / f"{sid}.jsonl"
+                    if candidate.exists():
+                        return candidate
+    except Exception:
+        pass
+
+    return None
 
 
 class ContractHelper:
