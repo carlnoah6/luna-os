@@ -106,15 +106,35 @@ def resolve_title_deps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Validate and fix step dependencies.
 
-    ``depends_on`` values are **0-indexed** offsets (matching the user/LLM
-    convention).  Validation uses the same 0-indexed space; the store layer
-    converts to 1-indexed step numbers on persist.
+    ``depends_on`` values should be **0-indexed** offsets internally.
+    The store layer converts to 1-indexed step numbers on persist.
+
+    If the input appears to use 1-indexed references (all deps >= 1 and
+    none equal to 0), they are automatically converted to 0-indexed.
 
     - Remove self-references (step depending on itself)
     - Remove references to non-existent steps
     - Detect circular dependencies and break them
     """
     total = len(steps)
+
+    # Auto-detect 1-indexed deps and convert to 0-indexed.
+    # Heuristic: if any dep value equals ``total`` (which is out of range
+    # for 0-indexed but valid as 1-indexed last step) OR all dep values
+    # are >= 1 with none equal to 0, treat as 1-indexed.
+    all_deps: list[int] = []
+    for s in steps:
+        all_deps.extend(d for d in (s.get("depends_on") or []) if isinstance(d, int))
+    if all_deps:
+        has_zero = 0 in all_deps
+        has_out_of_range = any(d >= total for d in all_deps)
+        all_positive = all(d >= 1 for d in all_deps)
+        if has_out_of_range or (all_positive and not has_zero):
+            # Convert 1-indexed → 0-indexed
+            for s in steps:
+                deps = s.get("depends_on") or []
+                s["depends_on"] = [d - 1 for d in deps if isinstance(d, int)]
+
     valid_ids = set(range(total))  # 0-indexed
 
     for i, s in enumerate(steps):
