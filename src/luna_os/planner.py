@@ -540,6 +540,9 @@ class Planner:
         chat_id = plan.chat_id or ""
         step_num = step.step_num
         task_id = step.task_id or ""
+        ws = os.environ.get(
+            "OPENCLAW_WORKSPACE", "/home/ubuntu/.openclaw/workspace"
+        )
 
         completed = [
             s
@@ -576,27 +579,27 @@ Report progress at each key milestone.
 ## Task ID
 {task_id}
 
-## Reporting (REQUIRED - your session will be considered FAILED if you don't run this)
+## Reporting (REQUIRED - session FAILS without this)
 
-**You MUST call one of these commands as your FINAL action. The plan cannot advance without it.**
+**You MUST call one of these as your FINAL action.**
 
-### Success case:
+### Success:
 ```bash
-cd /home/ubuntu/.openclaw/workspace && python3 scripts/emit_event.py step.done --task-id {task_id} --result "one-line result"
+cd {ws} && python3 scripts/emit_event.py step.done \\
+  --task-id {task_id} --result "one-line result"
 ```
-Example: `python3 scripts/emit_event.py step.done --task-id tid-0222-59 --result "北京天气：晴，16°C"`
 
-### Failure case (if you cannot complete the task):
+### Failure:
 ```bash
-cd /home/ubuntu/.openclaw/workspace && python3 scripts/emit_event.py step.failed --task-id {task_id} --result "error description"
+cd {ws} && python3 scripts/emit_event.py step.failed \\
+  --task-id {task_id} --result "error description"
 ```
-Example: `python3 scripts/emit_event.py step.failed --task-id tid-0222-59 --result "API rate limit exceeded"`
 
-### Waiting for user input case:
+### Waiting for user input:
 ```bash
-cd /home/ubuntu/.openclaw/workspace && python3 scripts/emit_event.py step.waiting --task-id {task_id} --result "your question"
+cd {ws} && python3 scripts/emit_event.py step.waiting \\
+  --task-id {task_id} --result "your question"
 ```
-Example: `python3 scripts/emit_event.py step.waiting --task-id tid-0222-59 --result "请提供 API Key"`
 {task_chat_section}
 ## Parent Chat
 Report results to: {chat_id}

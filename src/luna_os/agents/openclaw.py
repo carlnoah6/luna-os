@@ -134,10 +134,13 @@ class OpenClawRunner(AgentRunner):
             cmd.extend(["--task-id", task_id])
 
         try:
+            log_fh = open(  # noqa: SIM115
+                "/tmp/streaming-bridge.log", "a"
+            )
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=open("/tmp/streaming-bridge.log", "a"),
+                stderr=log_fh,
                 start_new_session=True,  # detach from parent
             )
             logger.info(
