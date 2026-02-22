@@ -20,11 +20,6 @@ from luna_os.agents.base import AgentRunner
 
 logger = logging.getLogger(__name__)
 
-# Default path to streaming-bridge.py
-_DEFAULT_BRIDGE = (
-    Path.home() / ".openclaw" / "workspace" / "scripts" / "streaming-bridge.py"
-)
-
 
 class OpenClawRunner(AgentRunner):
     """Spawn subagent sessions via Gateway RPC (``openclaw gateway call agent``)."""
@@ -32,10 +27,8 @@ class OpenClawRunner(AgentRunner):
     def __init__(
         self,
         binary: str = "openclaw",
-        bridge_script: str | Path | None = None,
     ) -> None:
         self._binary = binary
-        self._bridge_script = Path(bridge_script) if bridge_script else _DEFAULT_BRIDGE
 
     def spawn(
         self,
@@ -96,17 +89,10 @@ class OpenClawRunner(AgentRunner):
     def _start_bridge(
         self, session_label: str, chat_id: str, task_id: str = "",
     ) -> None:
-        """Launch streaming-bridge.py in the background."""
-        if not self._bridge_script.exists():
-            logger.warning(
-                "Streaming bridge not found at %s, skipping",
-                self._bridge_script,
-            )
-            return
-
+        """Launch streaming bridge in the background."""
         cmd = [
-            sys.executable,
-            str(self._bridge_script),
+            sys.executable, "-m", "luna_os.cli",
+            "streaming-bridge",
             session_label,
             chat_id,
             "--timeout", "1800",

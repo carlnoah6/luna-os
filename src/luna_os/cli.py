@@ -341,6 +341,14 @@ def main() -> None:
         )
         result = check_waiting_todos()
         print_json(result)
+    elif top == "streaming-bridge":
+        from luna_os.streaming_bridge import main as bridge_main
+
+        bridge_main()
+    elif top == "session-overview":
+        from luna_os.session_overview import main as overview_main
+
+        overview_main()
     else:
         print(f"Unknown command: {top}", file=sys.stderr)
         print(__doc__)
