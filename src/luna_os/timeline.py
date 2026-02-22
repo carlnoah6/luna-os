@@ -465,7 +465,7 @@ steps.forEach(s => {{
         }} else {{
             const x1 = from.cx + 2, y1 = from.cy;
             const x2 = to.lx - 2, y2 = to.ly;
-            // Cross-row: route via polyline through the gap between rows
+            // Cross-row: compact polyline that stays close to the nodes
             const gapKey = fromRow + '-' + toRow;
             if (!crossRowArrowIdx[gapKey]) crossRowArrowIdx[gapKey] = 0;
             const vOffset = crossRowArrowIdx[gapKey] * arrowLineSpacing;
@@ -474,12 +474,12 @@ steps.forEach(s => {{
             const fromBottom = from.bottom || from.cy + 20;
             const toTop = to.top || to.cy - 20;
             const gapMid = (fromBottom + toTop) / 2;
-            const rightEdge = totalW + wrapMargin * 0.7 + vOffset;
-            const leftEdge = wrapMargin * 0.3 + vOffset;
+            // Stay close: extend only 20px beyond the rightmost node
+            const margin = 20 + vOffset;
+            const turnX = Math.max(x1, x2) + margin;
             path.setAttribute('d',
-                `M${{x1}},${{y1}} H${{rightEdge}} `
-                + `V${{gapMid}} H${{leftEdge}} `
-                + `V${{y2}} H${{x2}}`);
+                `M${{x1}},${{y1}} H${{turnX}} `
+                + `V${{gapMid}} H${{x2}} V${{y2}}`);
         }}
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', strokeColor);
