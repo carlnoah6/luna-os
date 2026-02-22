@@ -291,6 +291,16 @@ class TestNormalizeStep:
         assert step["title"] == "Do it"
         assert step["prompt"] == "Details"
 
+    def test_normalize_description_key(self):
+        step = normalize_step({"description": "步骤一描述", "depends_on": []})
+        assert step["title"] == "步骤一描述"
+        assert step["prompt"] == "步骤一描述"
+
+    def test_normalize_description_as_prompt_fallback(self):
+        step = normalize_step({"title": "My Step", "description": "Detailed desc"})
+        assert step["title"] == "My Step"
+        assert step["prompt"] == "Detailed desc"
+
     def test_normalize_deps_int(self):
         step = normalize_step({"title": "X", "depends_on": 0})
         assert step["depends_on"] == [0]
