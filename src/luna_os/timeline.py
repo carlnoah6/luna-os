@@ -465,10 +465,21 @@ steps.forEach(s => {{
         }} else {{
             const x1 = from.cx + 2, y1 = from.cy;
             const x2 = to.lx - 2, y2 = to.ly;
-            const midX = (x1 + x2) / 2;
+            // Cross-row: route via polyline through the gap between rows
+            const gapKey = fromRow + '-' + toRow;
+            if (!crossRowArrowIdx[gapKey]) crossRowArrowIdx[gapKey] = 0;
+            const vOffset = crossRowArrowIdx[gapKey] * arrowLineSpacing;
+            crossRowArrowIdx[gapKey]++;
+            // Find the vertical midpoint between the two rows
+            const fromBottom = from.bottom || from.cy + 20;
+            const toTop = to.top || to.cy - 20;
+            const gapMid = (fromBottom + toTop) / 2;
+            const rightEdge = totalW + wrapMargin * 0.7 + vOffset;
+            const leftEdge = wrapMargin * 0.3 + vOffset;
             path.setAttribute('d',
-                `M${{x1}},${{y1}} C${{midX}},${{y1}} `
-                + `${{midX}},${{y2}} ${{x2}},${{y2}}`);
+                `M${{x1}},${{y1}} H${{rightEdge}} `
+                + `V${{gapMid}} H${{leftEdge}} `
+                + `V${{y2}} H${{x2}}`);
         }}
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', strokeColor);
