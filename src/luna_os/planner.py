@@ -312,6 +312,34 @@ class Planner:
             except Exception as exc:
                 logger.warning("Notification failed: %s", exc)
 
+    def _notify_main_session(
+        self, plan: Plan, summary: str | None = None,
+    ) -> None:
+        """Send a system event to the main OpenClaw session on plan completion.
+
+        Uses ``openclaw system event`` CLI to inject a message into the
+        main conversation session so the user gets a completion notice.
+        """
+        import subprocess
+
+        goal = (plan.goal or "")[:80]
+        text = f"[Plan Completed] {plan.id}: {goal}"
+        if summary:
+            text += f"\n\n{summary}"
+
+        try:
+            subprocess.run(
+                [
+                    "openclaw", "system", "event",
+                    "--text", text,
+                    "--mode", "now",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+        except Exception as exc:
+            logger.warning("Main session notification failed: %s", exc)
+
     def _send_card(self, chat_id: str, card_data: dict[str, Any]) -> dict[str, Any]:
         """Send an interactive card. Returns response with message_id."""
         if self.notifications and chat_id:
@@ -601,10 +629,12 @@ Report results to: {chat_id}
                 task_chat_id = ""
                 if self.notifications:
                     try:
+                        owner_id = os.environ.get("LARK_OWNER_ID", "")
+                        members = [owner_id] if owner_id else []
                         task_chat_id = self.notifications.create_chat(
                             f"Task {task_id} Step {step.step_num}: {step.title[:30]}",
                             f"Plan step: {step.title}",
-                            [],
+                            members,
                         )
                         if task_chat_id:
                             self.store.update_task(task_id, task_chat_id=task_chat_id)
@@ -797,6 +827,7 @@ Report results to: {chat_id}
                         self._send_plan_graph(plan)
                         if summary:
                             self._notify(plan.chat_id, summary)
+                        self._notify_main_session(plan, summary)
                         plan_completed = True
 
         self._update_dashboard("step_done")
