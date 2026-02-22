@@ -35,6 +35,7 @@ def _make_planner(
 ) -> tuple[Planner, MemoryBackend]:
     store = MemoryBackend()
     planner = Planner(store, agent_runner=runner, max_concurrent=6)
+    planner._notify_main_session = lambda *a, **kw: None  # type: ignore[assignment]
     return planner, store
 
 

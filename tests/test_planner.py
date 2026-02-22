@@ -23,6 +23,8 @@ class _NoopRunner(AgentRunner):
 def make_planner() -> tuple[Planner, MemoryBackend]:
     store = MemoryBackend()
     planner = Planner(store, agent_runner=_NoopRunner(), max_concurrent=6)
+    # Disable main session notifications in tests (avoids subprocess calls)
+    planner._notify_main_session = lambda *a, **kw: None  # type: ignore[assignment]
     return planner, store
 
 

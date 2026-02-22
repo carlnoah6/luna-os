@@ -323,7 +323,11 @@ class Planner:
         Events: step_started, step_done, step_failed, plan_completed,
                 plan_stuck, plan_started
         """
+        import shutil
         import subprocess
+
+        if not shutil.which("openclaw"):
+            return
 
         goal = (plan.goal or "")[:60]
         text = f"[Plan {event}] {plan.id}: {goal}"
