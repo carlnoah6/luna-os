@@ -313,19 +313,22 @@ class Planner:
                 logger.warning("Notification failed: %s", exc)
 
     def _notify_main_session(
-        self, plan: Plan, summary: str | None = None,
+        self, plan: Plan, event: str, detail: str = "",
     ) -> None:
-        """Send a system event to the main OpenClaw session on plan completion.
+        """Send a system event to the main OpenClaw session on plan state changes.
 
         Uses ``openclaw system event`` CLI to inject a message into the
-        main conversation session so the user gets a completion notice.
+        main conversation session so the user gets real-time plan updates.
+
+        Events: step_started, step_done, step_failed, plan_completed,
+                plan_stuck, plan_started
         """
         import subprocess
 
-        goal = (plan.goal or "")[:80]
-        text = f"[Plan Completed] {plan.id}: {goal}"
-        if summary:
-            text += f"\n\n{summary}"
+        goal = (plan.goal or "")[:60]
+        text = f"[Plan {event}] {plan.id}: {goal}"
+        if detail:
+            text += f"\n{detail}"
 
         try:
             subprocess.run(
@@ -648,7 +651,8 @@ Report results to: {chat_id}
                     try:
                         session_label = f"task-{task_chat_id[-8:]}" if task_chat_id else ""
                         session_key = self.agent_runner.spawn(
-                            task_id, prompt, session_label
+                            task_id, prompt, session_label,
+                            reply_chat_id=task_chat_id,
                         )
                         # Update session_key from placeholder to actual value
                         # (use update_task to avoid resetting started_at)
@@ -674,6 +678,18 @@ Report results to: {chat_id}
                 )
 
             results.append((step.step_num, spawn_ok))
+
+            # Notify main session about step state change
+            if spawn_ok:
+                self._notify_main_session(
+                    plan, "step_started",
+                    f"▶️ Step {step.step_num} started: {step.title[:60]}",
+                )
+            else:
+                self._notify_main_session(
+                    plan, "step_spawn_failed",
+                    f"❌ Step {step.step_num} spawn failed: {step.title[:60]}",
+                )
         return results
 
     # -- Plan commands ---------------------------------------------------------
@@ -781,6 +797,12 @@ Report results to: {chat_id}
                 f"Step {step_num} ({step.title}) done: {_short_desc(result, 300)}",
             )
 
+        # Notify main session
+        self._notify_main_session(
+            plan, "step_done",
+            f"Step {step_num} done: {_short_desc(result, 120)}",
+        )
+
         # Try to advance
         ready = self.store.ready_steps(plan.id)
         spawn_results: list[tuple[int, bool]] = []
@@ -816,6 +838,12 @@ Report results to: {chat_id}
                         f"⚠️ {len(still_pending)} pending step(s) cannot proceed "
                         f"(dependencies not met). Check for failed steps.",
                     )
+                    self._notify_main_session(
+                        plan, "stuck",
+                        f"⚠️ {len(still_pending)} pending step(s) blocked "
+                        f"(deps not met after step {step_num} done). "
+                        f"May need replan.",
+                    )
                     self._notify(plan.chat_id, format_plan(plan))
                     self._send_plan_graph(plan)
                 else:
@@ -827,7 +855,10 @@ Report results to: {chat_id}
                         self._send_plan_graph(plan)
                         if summary:
                             self._notify(plan.chat_id, summary)
-                        self._notify_main_session(plan, summary)
+                        self._notify_main_session(
+                            plan, "completed",
+                            summary or "All steps done.",
+                        )
                         plan_completed = True
 
         self._update_dashboard("step_done")
@@ -865,6 +896,13 @@ Report results to: {chat_id}
                     task.task_chat_id,
                     f"Step {step_num} FAILED: {_short_desc(error, 120)}",
                 )
+
+        # Notify main session about failure
+        self._notify_main_session(
+            plan, "step_failed",
+            f"❌ Step {step_num} failed: {_short_desc(error, 120)}. "
+            f"Consider replan or manual intervention.",
+        )
 
         plan = self.store.get_plan(plan.id)  # type: ignore[assignment]
         if plan:

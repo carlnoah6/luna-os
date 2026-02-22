@@ -10,7 +10,10 @@ from tests.memory_store import MemoryBackend
 class _NoopRunner(AgentRunner):
     """Minimal agent runner that always succeeds (for tests that don't care)."""
 
-    def spawn(self, task_id: str, prompt: str, session_label: str = "") -> str:
+    def spawn(
+        self, task_id: str, prompt: str,
+        session_label: str = "", reply_chat_id: str = "",
+    ) -> str:
         return session_label or f"task-{task_id}"
 
     def is_running(self, session_key: str) -> bool:
