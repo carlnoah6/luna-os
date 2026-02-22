@@ -444,8 +444,8 @@ Report results to: {chat_id}
 
 ## CRITICAL: Context Budget Rules
 - **Never read entire large files** — use grep/sed to extract only the specific functions you need.
-- **Write files in segments** — use write for a small skeleton first, then append sections. Never try to write >200 lines in a single write call.
-- **Monitor your context** — if you've read many files, summarize findings in a local notes file and avoid re-reading.
+- **Write files in segments** — skeleton first, then append. Never write >200 lines at once.
+- **Monitor your context** — summarize findings in a local notes file and avoid re-reading.
 - **Prefer exec+cat/sed over read** for targeted extraction from large source files.
 """
 
