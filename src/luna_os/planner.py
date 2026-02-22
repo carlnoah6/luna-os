@@ -571,17 +571,21 @@ class Planner:
             "OPENCLAW_WORKSPACE", "/home/ubuntu/.openclaw/workspace"
         )
 
-        completed = [
-            s
-            for s in plan.steps
-            if (s.status.value if hasattr(s.status, "value") else str(s.status)) == "done"
-        ]
-        context_lines = []
-        for cs in completed[-3:]:
-            context_lines.append(
-                f"- Step {cs.step_num}: {cs.title} -> {_short_desc(cs.result or '', 80)}"
-            )
-        context = "\n".join(context_lines) if context_lines else "(none)"
+        # Build full plan overview so the agent knows the big picture
+        plan_lines = []
+        for s in plan.steps:
+            st = s.status.value if hasattr(s.status, "value") else str(s.status)
+            marker = "→" if s.step_num == step_num else " "
+            deps = f" (after {','.join(str(d) for d in s.depends_on)})" if s.depends_on else ""
+            if st == "done":
+                result = _short_desc(s.result or "", 60)
+                plan_lines.append(f"  {marker} [{st}] {s.step_num}. {s.title}{deps} — {result}")
+            elif st == "running":
+                note = "← YOU" if s.step_num == step_num else "(parallel)"
+                plan_lines.append(f"  {marker} [{st}] {s.step_num}. {s.title}{deps} {note}")
+            else:
+                plan_lines.append(f"  {marker} [{st}] {s.step_num}. {s.title}{deps}")
+        plan_overview = "\n".join(plan_lines)
 
         task_chat_section = ""
         if task_chat_id:
@@ -596,12 +600,15 @@ Report progress at each key milestone.
 ## Plan Goal
 {goal}
 
+## Full Plan Overview
+{plan_overview}
+
+**Your job is ONLY step {step_num}.** Do not duplicate work from other steps.
+If another step is running in parallel, trust that it will handle its own scope.
+
 ## Current Step
 **Step {step_num}: {step.title or ""}**
 {prompt_text}
-
-## Context from Completed Steps
-{context}
 
 ## Task ID
 {task_id}
@@ -698,12 +705,14 @@ Report results to: {chat_id}
                 if plan_fresh and updated_step:
                     prompt = self._build_spawn_prompt(plan_fresh, updated_step, task_chat_id)
                     timeout_min = self._estimate_timeout(updated_step)
+                    step_model = updated_step.model
                     try:
                         session_label = f"task-{task_chat_id[-8:]}" if task_chat_id else ""
                         session_key = self.agent_runner.spawn(
                             task_id, prompt, session_label,
                             reply_chat_id=task_chat_id,
                             timeout_minutes=timeout_min,
+                            model=step_model,
                         )
                         # Update session_key from placeholder to actual value
                         # (use update_task to avoid resetting started_at)
@@ -1060,6 +1069,7 @@ Report results to: {chat_id}
             self.store.insert_step(
                 plan.id, step_num, ns["title"], ns["prompt"], deps,
                 timeout_minutes=ns.get("timeout_minutes"),
+                model=ns.get("model"),
             )
 
         # Auto-advance if plan is active

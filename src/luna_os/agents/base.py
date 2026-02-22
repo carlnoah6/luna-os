@@ -16,6 +16,7 @@ class AgentRunner(ABC):
         session_label: str = "",
         reply_chat_id: str = "",
         timeout_minutes: int | None = None,
+        model: str | None = None,
     ) -> str:
         """Spawn an agent session. Return a session key / identifier."""
 

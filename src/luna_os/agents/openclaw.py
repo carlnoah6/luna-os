@@ -37,6 +37,7 @@ class OpenClawRunner(AgentRunner):
         session_label: str = "",
         reply_chat_id: str = "",
         timeout_minutes: int | None = None,
+        model: str | None = None,
     ) -> str:
         """Spawn a subagent session via Gateway RPC.
 
@@ -51,7 +52,7 @@ class OpenClawRunner(AgentRunner):
 
         timeout_sec = (timeout_minutes or 30) * 60
 
-        params = {
+        params: dict[str, object] = {
             "message": prompt,
             "sessionKey": session_key,
             "idempotencyKey": str(uuid.uuid4()),
@@ -59,6 +60,8 @@ class OpenClawRunner(AgentRunner):
             "lane": "subagent",
             "timeout": timeout_sec,
         }
+        if model:
+            params["model"] = model
 
         cmd = [
             self._binary, "gateway", "call", "agent",

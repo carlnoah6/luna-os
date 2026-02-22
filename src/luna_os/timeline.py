@@ -30,6 +30,10 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
         }
         if s.task_id:
             entry["tid"] = s.task_id
+        if s.timeout_minutes:
+            entry["timeout"] = s.timeout_minutes
+        if s.model:
+            entry["model"] = s.model
         steps_data.append(entry)
     return steps_data
 
@@ -194,8 +198,13 @@ steps.forEach(s => {{
         ? `<span class="node-tid">${{s.tid}}</span>` : '';
     const dur = (s.status === 'running' && s.duration)
         ? `<span class="node-duration">\\u23f1${{s.duration}}</span>` : '';
-    const meta = (tid || dur)
-        ? `<div class="node-meta">${{tid}}${{dur}}</div>` : '';
+    const timeout = s.timeout
+        ? `<span class="node-tid">\\u23f0${{s.timeout}}m</span>` : '';
+    const model = s.model
+        ? `<span class="node-tid">\\U0001f916${{s.model}}</span>` : '';
+    const metaParts = [tid, dur, timeout, model].filter(Boolean);
+    const meta = metaParts.length
+        ? `<div class="node-meta">${{metaParts.join(' ')}}</div>` : '';
     el.innerHTML = `
         <div class="node-icon">S${{s.id}}</div>
         <div class="node-body">

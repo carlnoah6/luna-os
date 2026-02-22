@@ -14,6 +14,7 @@ class _NoopRunner(AgentRunner):
         self, task_id: str, prompt: str,
         session_label: str = "", reply_chat_id: str = "",
         timeout_minutes: int | None = None,
+        model: str | None = None,
     ) -> str:
         return session_label or f"task-{task_id}"
 
