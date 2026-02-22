@@ -479,9 +479,11 @@ steps.forEach(s => {{
             // Stay close: extend only 20px beyond the rightmost node
             const margin = 20 + vOffset;
             const turnX = Math.max(x1, x2) + margin;
+            // Offset the descent line on the left so multiple arrows don't overlap
+            const descentX = x2 - 6 - vOffset;
             path.setAttribute('d',
                 `M${{x1}},${{y1}} H${{turnX}} `
-                + `V${{gapMid}} H${{x2}} V${{y2}}`);
+                + `V${{gapMid}} H${{descentX}} V${{y2}} H${{x2}}`);
         }}
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', strokeColor);
