@@ -252,6 +252,7 @@ if (independent.length > 0) {{
         col++;
     }});
     phasedStartY = curY + rowH + baseRowGap + 10;
+    totalH = Math.max(totalH, curY + rowH + gapY);
 
     // Divider line
     if (phased.length > 0) {{
