@@ -379,40 +379,8 @@ class LarkProvider(NotificationProvider):
     # ── Optional hooks ───────────────────────────────────────────
 
     def update_dashboard(self, trigger: str = "unknown") -> None:
-        """Trigger Lark dashboard card refresh (30s debounce)."""
-        import subprocess
-        from pathlib import Path
-
-        state_file = Path(
-            os.environ.get(
-                "DASHBOARD_STATE_FILE",
-                os.path.expanduser("~/.openclaw/workspace/data/dashboard-state.json"),
-            )
-        )
-        # Rate limit: 30s debounce
-        if state_file.exists():
-            try:
-                with open(state_file) as f:
-                    state = json.load(f)
-                last_ts = state.get("last_update_ts", 0)
-                if time.time() - last_ts < 30:
-                    return
-            except Exception:
-                pass
-
-        script = os.environ.get(
-            "DASHBOARD_SCRIPT",
-            os.path.expanduser("~/.openclaw/workspace/scripts/lark-task-dashboard.py"),
-        )
-        if not os.path.exists(script):
-            return
-        with contextlib.suppress(Exception):
-            subprocess.Popen(
-                ["python3", script],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+        """Dashboard updates are now manual-only (card refresh button)."""
+        return
 
     def update_group_title(self, chat_id: str) -> None:
         """Fire-and-forget group title update based on plan progress."""
