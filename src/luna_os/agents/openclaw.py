@@ -16,7 +16,13 @@ class OpenClawRunner(AgentRunner):
     def __init__(self, binary: str = "openclaw") -> None:
         self._binary = binary
 
-    def spawn(self, task_id: str, prompt: str, session_label: str = "") -> str:
+    def spawn(
+        self,
+        task_id: str,
+        prompt: str,
+        session_label: str = "",
+        reply_chat_id: str = "",
+    ) -> str:
         """Spawn an OpenClaw agent session.
 
         Returns the session key used to identify this session.
@@ -32,6 +38,13 @@ class OpenClawRunner(AgentRunner):
             "--message",
             prompt,
         ]
+        # If a reply chat is provided, deliver results to Feishu
+        if reply_chat_id:
+            cmd.extend([
+                "--deliver",
+                "--reply-channel", "feishu",
+                "--reply-to", reply_chat_id,
+            ])
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,

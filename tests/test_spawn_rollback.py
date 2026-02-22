@@ -16,7 +16,10 @@ class FakeRunner(AgentRunner):
         self._fail = fail
         self.spawned: list[tuple[str, str]] = []
 
-    def spawn(self, task_id: str, prompt: str, session_label: str = "") -> str:
+    def spawn(
+        self, task_id: str, prompt: str,
+        session_label: str = "", reply_chat_id: str = "",
+    ) -> str:
         if self._fail:
             raise RuntimeError("simulated spawn failure")
         session_id = session_label or f"task-{task_id}"
