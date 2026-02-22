@@ -162,7 +162,11 @@ class TestOpenClawRunnerIsRunning:
     def test_job_errored_with_run(self):
         runner = OpenClawRunner()
         out = self._cron_output([
-            {"name": "task-abc", "enabled": True, "state": {"lastStatus": "error", "lastRunAtMs": 123}},
+            {
+                "name": "task-abc",
+                "enabled": True,
+                "state": {"lastStatus": "error", "lastRunAtMs": 123},
+            },
         ])
         with patch("subprocess.run") as m:
             m.return_value = MagicMock(returncode=0, stdout=out, stderr="")
