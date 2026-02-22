@@ -62,6 +62,29 @@ class OpenClawRunner(AgentRunner):
             raise RuntimeError(
                 f"Agent process exited immediately with code {ret} (cmd: {cmd[0]})"
             )
+
+        # Start streaming bridge to push real-time output to Feishu chat
+        if reply_chat_id:
+            bridge_script = os.environ.get(
+                "STREAMING_BRIDGE",
+                str(Path.home() / ".openclaw" / "workspace" / "scripts"
+                    / "streaming-bridge.py"),
+            )
+            if os.path.exists(bridge_script):
+                import contextlib
+
+                with contextlib.suppress(Exception):
+                    subprocess.Popen(
+                        [
+                            "python3", bridge_script,
+                            session_id, reply_chat_id,
+                            "--timeout", "1800",
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+
         return session_id
 
     def is_running(self, session_key: str) -> bool:
