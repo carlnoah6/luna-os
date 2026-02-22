@@ -344,7 +344,11 @@ class Planner:
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**目标:** {plan.goal}\n**步骤数:** {len(steps)}\n**Plan ID:** {plan.id}",
+                        "content": (
+                            f"**目标:** {plan.goal}\n"
+                            f"**步骤数:** {len(steps)}\n"
+                            f"**Plan ID:** {plan.id}"
+                        ),
                     },
                 },
                 {"tag": "hr"},

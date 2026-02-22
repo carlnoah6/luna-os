@@ -1,7 +1,7 @@
 """Tests for Planner.build_confirm_card."""
 
 from luna_os.planner import Planner
-from luna_os.types import Plan, Step, PlanStatus, StepStatus
+from luna_os.types import Plan, PlanStatus, Step
 
 
 def _make_plan(n_steps=3, goal="Test goal"):
