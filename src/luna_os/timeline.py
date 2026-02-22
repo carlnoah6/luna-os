@@ -20,9 +20,11 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
     for s in plan.steps:
         # Filter out self-referencing dependencies
         deps = [d for d in (s.depends_on or []) if d != s.step_num]
+        raw_title = s.title or f"Step {s.step_num}"
+        title = raw_title[:50] + ("…" if len(raw_title) > 50 else "")
         entry: dict[str, Any] = {
             "id": s.step_num,
-            "title": s.title or f"Step {s.step_num}",
+            "title": title,
             "deps": deps,
             "status": s.status.value if hasattr(s.status, "value") else str(s.status),
         }
@@ -32,7 +34,11 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
     return steps_data
 
 
-def generate_html(steps_data: list[dict[str, Any]], title: str = "Plan Timeline") -> str:
+def generate_html(
+    steps_data: list[dict[str, Any]],
+    title: str = "Plan Timeline",
+    subtitle: str = "",
+) -> str:
     """Generate timeline HTML from step data with statuses.
 
     Each step dict: ``{id, title, deps, status, tid?, duration?}``
@@ -41,6 +47,9 @@ def generate_html(steps_data: list[dict[str, Any]], title: str = "Plan Timeline"
     - tid: optional task ID string
     - duration: optional string for running tasks (e.g. "3m")
     """
+    subtitle_html = (
+        f'<div class="subtitle">{subtitle}</div>' if subtitle else ""
+    )
     steps_json = json.dumps(steps_data, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
@@ -60,7 +69,13 @@ body {{
     font-size: 15px;
     font-weight: 700;
     color: #1a1a2e;
-    margin-bottom: 24px;
+    margin-bottom: 4px;
+}}
+.subtitle {{
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 20px;
+    font-family: monospace;
 }}
 .graph {{ position: relative; }}
 .node {{
@@ -80,8 +95,13 @@ body {{
     display: flex; align-items: center; justify-content: center;
     font-size: 11px; font-weight: 700; color: white; flex-shrink: 0;
 }}
-.node-body {{ flex: 1; min-width: 0; }}
-.node-text {{ font-size: 12px; color: #333; font-weight: 500; line-height: 1.3; }}
+.node-body {{ flex: 1; min-width: 0; overflow: hidden; }}
+.node-text {{
+    font-size: 12px; color: #333; font-weight: 500; line-height: 1.3;
+    word-break: break-word; overflow-wrap: break-word;
+    display: -webkit-box; -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical; overflow: hidden;
+}}
 .node-meta {{ display: flex; align-items: center; gap: 6px; margin-top: 2px; }}
 .node-tid {{ font-size: 9px; color: #999; font-family: monospace; }}
 .node-duration {{ font-size: 9px; color: #2196F3; font-weight: 600; }}
@@ -107,6 +127,7 @@ svg.arrows {{ position: absolute; top: 0; left: 0; pointer-events: none; }}
 <body>
 <div class="container">
     <div class="title">{title}</div>
+    {subtitle_html}
     <div class="graph" id="graph"></div>
 </div>
 <script>
