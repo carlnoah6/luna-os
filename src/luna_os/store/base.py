@@ -173,6 +173,7 @@ class StorageBackend(ABC):
         title: str,
         prompt: str,
         depends_on: list[int] | None = None,
+        timeout_minutes: int | None = None,
     ) -> None:
         """Insert a single pending step."""
 

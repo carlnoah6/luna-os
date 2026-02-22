@@ -533,6 +533,32 @@ class Planner:
 
     # -- Spawn helpers ---------------------------------------------------------
 
+    @staticmethod
+    def _estimate_timeout(step: Step) -> int:
+        """Estimate timeout in minutes for a step based on its prompt.
+
+        Returns the step's explicit timeout_minutes if set, otherwise
+        estimates based on prompt keywords.
+        """
+        if step.timeout_minutes:
+            return step.timeout_minutes
+
+        prompt = (step.prompt or step.title or "").lower()
+        # Heavy tasks: research, refactor, multi-file, reverse-engineer
+        heavy = ("refactor", "reverse", "rewrite", "migrate", "redesign",
+                 "analyze", "research", "investigate", "audit", "review")
+        if any(kw in prompt for kw in heavy):
+            return 30
+
+        # Medium tasks: write code, implement, test, fix bug
+        medium = ("implement", "write", "create", "build", "fix",
+                  "test", "debug", "integrate", "deploy")
+        if any(kw in prompt for kw in medium):
+            return 15
+
+        # Light tasks: compute, calculate, query, summarize, report
+        return 5
+
     def _build_spawn_prompt(self, plan: Plan, step: Step, task_chat_id: str = "") -> str:
         """Build the prompt for spawning a subagent for a step."""
         prompt_text = step.prompt or step.title or ""
@@ -540,6 +566,7 @@ class Planner:
         chat_id = plan.chat_id or ""
         step_num = step.step_num
         task_id = step.task_id or ""
+        timeout_min = self._estimate_timeout(step)
         ws = os.environ.get(
             "OPENCLAW_WORKSPACE", "/home/ubuntu/.openclaw/workspace"
         )
@@ -609,6 +636,10 @@ cd {ws} && python3 scripts/emit_event.py step.waiting \\
   --task-id {task_id} --result "your question"
 ```
 {task_chat_section}
+## Time Budget
+You have **{timeout_min} minutes** for this step. Plan your approach accordingly.
+If running out of time, emit step.waiting with a progress summary.
+
 ## Parent Chat
 Report results to: {chat_id}
 
@@ -666,11 +697,13 @@ Report results to: {chat_id}
                 updated_step = self.store.get_step(plan.id, step.step_num)
                 if plan_fresh and updated_step:
                     prompt = self._build_spawn_prompt(plan_fresh, updated_step, task_chat_id)
+                    timeout_min = self._estimate_timeout(updated_step)
                     try:
                         session_label = f"task-{task_chat_id[-8:]}" if task_chat_id else ""
                         session_key = self.agent_runner.spawn(
                             task_id, prompt, session_label,
                             reply_chat_id=task_chat_id,
+                            timeout_minutes=timeout_min,
                         )
                         # Update session_key from placeholder to actual value
                         # (use update_task to avoid resetting started_at)
@@ -1024,7 +1057,10 @@ Report results to: {chat_id}
                 deps = list(auto_deps)
             else:
                 deps = []
-            self.store.insert_step(plan.id, step_num, ns["title"], ns["prompt"], deps)
+            self.store.insert_step(
+                plan.id, step_num, ns["title"], ns["prompt"], deps,
+                timeout_minutes=ns.get("timeout_minutes"),
+            )
 
         # Auto-advance if plan is active
         spawn_ok = False
@@ -1362,10 +1398,12 @@ Report results to: {chat_id}
                 should_fail = False
                 fail_reason = ""
 
-                if age_min > 45:
+                step_timeout = step.timeout_minutes or 45
+                if age_min > step_timeout:
                     should_fail = True
                     fail_reason = (
-                        f"Auto-failed: step stuck for {age_min:.0f} minutes (timeout=45min)"
+                        f"Auto-failed: step stuck for {age_min:.0f}min"
+                        f" (timeout={step_timeout}min)"
                     )
 
                 if should_fail:

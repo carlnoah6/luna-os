@@ -15,6 +15,7 @@ class AgentRunner(ABC):
         prompt: str,
         session_label: str = "",
         reply_chat_id: str = "",
+        timeout_minutes: int | None = None,
     ) -> str:
         """Spawn an agent session. Return a session key / identifier."""
 

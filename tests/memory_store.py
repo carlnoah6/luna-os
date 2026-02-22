@@ -215,6 +215,7 @@ class MemoryBackend(StorageBackend):
                     prompt=s.get("prompt", ""),
                     status=StepStatus.PENDING,
                     depends_on=deps,
+                    timeout_minutes=s.get("timeout_minutes"),
                 )
             )
         plan = Plan(
@@ -353,6 +354,7 @@ class MemoryBackend(StorageBackend):
         title: str,
         prompt: str,
         depends_on: list[int] | None = None,
+        timeout_minutes: int | None = None,
     ) -> None:
         plan = self._plans.get(plan_id)
         if plan:
@@ -364,6 +366,7 @@ class MemoryBackend(StorageBackend):
                     prompt=prompt,
                     status=StepStatus.PENDING,
                     depends_on=depends_on or [],
+                    timeout_minutes=timeout_minutes,
                 )
             )
 
