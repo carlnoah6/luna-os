@@ -1,18 +1,15 @@
 """OpenClaw agent runner — spawns isolated sessions via the Gateway.
 
-Uses ``openclaw cron add --at`` to create one-shot isolated sessions that
-are fully managed by the Gateway (visible in sessions_list, streaming
-output, auto-announce on completion).
+Uses ``openclaw agent`` to run isolated sessions directly. The Gateway
+manages the session lifecycle, streaming, and delivery.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from luna_os.agents.base import AgentRunner
@@ -41,74 +38,52 @@ class OpenClawRunner(AgentRunner):
         session_label: str = "",
         reply_chat_id: str = "",
     ) -> str:
-        """Spawn an isolated session via ``openclaw cron add --at``.
+        """Spawn an isolated agent session via ``openclaw agent``.
 
-        Creates a one-shot cron job that runs immediately as an isolated
-        session. The Gateway manages the session lifecycle, streaming,
-        and announces the result back to the main session on completion.
+        Runs the agent directly (no cron delay). The Gateway manages
+        the session lifecycle. If *reply_chat_id* is provided, results
+        are delivered to that Feishu chat and a streaming bridge is
+        started for live progress.
 
-        If *reply_chat_id* is provided and a streaming bridge script exists,
-        a background bridge process is started to stream output to the Lark chat.
-
-        Returns the cron job name as the session key.
+        Returns the session id used.
         """
         name = session_label or f"task-{task_id}"
-        # Schedule 15 seconds from now — must be enough for the cron add
-        # command itself to complete + Gateway to register the job.
-        # 5s was too tight: large prompts take 2-3s to serialize, and
-        # if createdAtMs > schedule.at the job never fires.
-        run_at = (datetime.now(UTC) + timedelta(seconds=15)).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
 
         cmd = [
-            self._binary, "cron", "add",
-            "--at", run_at,
-            "--session", "isolated",
+            self._binary, "agent",
             "--message", prompt,
-            "--announce",
-            "--delete-after-run",
-            "--name", name,
-            "--timeout-seconds", "1800",
+            "--session-id", name,
+            "--timeout", "1800",
             "--json",
         ]
 
         # Deliver results to Feishu chat if available
         if reply_chat_id:
-            cmd.extend(["--channel", "feishu", "--to", reply_chat_id])
+            cmd.extend([
+                "--deliver",
+                "--reply-channel", "feishu",
+                "--reply-to", f"chat:{reply_chat_id}",
+            ])
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"openclaw cron add failed (code {result.returncode}): "
-                f"{result.stderr.strip()[:200]}"
-            )
-
-        try:
-            data = json.loads(result.stdout)
-            job_id = data.get("id", "")
-        except (json.JSONDecodeError, KeyError) as exc:
-            raise RuntimeError(
-                f"Failed to parse cron add output: {result.stdout[:200]}"
-            ) from exc
-
-        if not job_id:
-            raise RuntimeError("openclaw cron add returned empty job id")
-
-        logger.info(
-            "Spawned isolated session: name=%s job_id=%s at=%s",
-            name, job_id, run_at,
-        )
-
-        # Start streaming bridge if we have a chat to stream to
+        # Start streaming bridge BEFORE launching agent
         if reply_chat_id:
             self._start_bridge(name, reply_chat_id, task_id)
+
+        # Run agent in background (non-blocking)
+        log_fh = open(  # noqa: SIM115
+            f"/tmp/agent-spawn-{name}.log", "a"
+        )
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_fh,
+            stderr=log_fh,
+            start_new_session=True,
+        )
+
+        logger.info(
+            "Spawned agent session: name=%s pid=%d task=%s",
+            name, proc.pid, task_id,
+        )
 
         return name
 
@@ -154,41 +129,25 @@ class OpenClawRunner(AgentRunner):
             logger.warning("Failed to start streaming bridge: %s", exc)
 
     def is_running(self, session_key: str) -> bool:
-        """Check if a spawned session is still running.
+        """Check if a spawned agent session is still running.
 
-        Uses ``openclaw cron list --json`` to check if the cron job with
-        the matching name still exists. Since jobs are created with
-        ``--delete-after-run``, a job's presence means it's either
-        pending or actively running.
-
-        Falls back to session file check if cron list fails.
+        Checks if an ``openclaw agent`` process with the matching
+        session-id is still alive, or if the session file was recently
+        modified (within 5 minutes).
         """
+        # Method 1: check for running process
         try:
             result = subprocess.run(
-                [self._binary, "cron", "list", "--json"],
-                capture_output=True,
-                text=True,
-                timeout=10,
+                ["pgrep", "-f", f"--session-id {session_key}"],
+                capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0 and result.stdout.strip():
-                data = json.loads(result.stdout)
-                jobs = data if isinstance(data, list) else data.get("jobs", [])
-                for job in jobs:
-                    if job.get("name") == session_key and job.get("enabled", False):
-                        state = job.get("state", {})
-                        # Job exists and hasn't errored out
-                        if state.get("lastStatus") not in ("error",):
-                            return True
-                        # Even if last status was error, if it hasn't run yet
-                        # (no lastRunAtMs), it's still pending
-                        if not state.get("lastRunAtMs"):
-                            return True
-        except Exception as exc:
-            logger.debug("cron list check failed, falling back: %s", exc)
-            # Fall back to file check
-            return self._check_session_file(session_key)
+                return True
+        except Exception:
+            pass
 
-        return False
+        # Method 2: check session file recency
+        return self._check_session_file(session_key)
 
     @staticmethod
     def _check_session_file(session_key: str) -> bool:
