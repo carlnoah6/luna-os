@@ -32,12 +32,23 @@ class OpenClawRunner(AgentRunner):
             "--message",
             prompt,
         ]
-        subprocess.Popen(
+        proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
+        # Give the process a moment to fail (e.g. binary not found, crash on
+        # startup).  If it exits immediately with a non-zero code, raise so the
+        # caller can roll back the task/step state.
+        import time as _time
+
+        _time.sleep(0.3)
+        ret = proc.poll()
+        if ret is not None and ret != 0:
+            raise RuntimeError(
+                f"Agent process exited immediately with code {ret} (cmd: {cmd[0]})"
+            )
         return session_id
 
     def is_running(self, session_key: str) -> bool:

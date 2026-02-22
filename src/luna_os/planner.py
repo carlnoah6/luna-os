@@ -444,8 +444,8 @@ Report results to: {chat_id}
 
 ## CRITICAL: Context Budget Rules
 - **Never read entire large files** — use grep/sed to extract only the specific functions you need.
-- **Write files in segments** — use write for a small skeleton first, then append sections. Never try to write >200 lines in a single write call.
-- **Monitor your context** — if you've read many files, summarize findings in a local notes file and avoid re-reading.
+- **Write files in segments** — skeleton first, then append. Never write >200 lines at once.
+- **Monitor your context** — summarize findings in a local notes file and avoid re-reading.
 - **Prefer exec+cat/sed over read** for targeted extraction from large source files.
 """
 
@@ -492,10 +492,31 @@ Report results to: {chat_id}
                     prompt = self._build_spawn_prompt(plan_fresh, updated_step, task_chat_id)
                     try:
                         session_label = f"task-{task_chat_id[-8:]}" if task_chat_id else ""
-                        self.agent_runner.spawn(task_id, prompt, session_label)
+                        session_key = self.agent_runner.spawn(
+                            task_id, prompt, session_label
+                        )
+                        # Update session_key from placeholder to actual value
+                        # (use update_task to avoid resetting started_at)
+                        if session_key:
+                            self.store.update_task(task_id, session_key=session_key)
                         spawn_ok = True
                     except Exception as exc:
-                        logger.warning("Spawn failed: %s", exc)
+                        logger.warning("Spawn failed for step %d: %s", step.step_num, exc)
+
+            # Rollback: if spawn failed, revert task and step to failed state
+            # so they don't sit in running/cron-pending forever.
+            if not spawn_ok:
+                if not self.agent_runner:
+                    fail_msg = "Spawn failed: no agent_runner configured"
+                else:
+                    fail_msg = "Spawn failed: agent process could not be started"
+                self.store.fail_step(plan.id, step.step_num, fail_msg)
+                self.store.fail_task(task_id, fail_msg)
+                logger.warning(
+                    "Rolled back step %d (task %s) to failed after spawn failure",
+                    step.step_num,
+                    task_id,
+                )
 
             results.append((step.step_num, spawn_ok))
         return results
@@ -1064,10 +1085,23 @@ Report results to: {chat_id}
                 elif age_min > 2 and self.agent_runner:
                     task_id = step.task_id or ""
                     task_obj = self.store.get_task(task_id) if task_id else None
-                    task_chat = task_obj.task_chat_id if task_obj else ""
-                    if task_chat:
-                        session_id = f"task-{task_chat[-8:]}"
-                        if not self.agent_runner.is_running(session_id):
+                    session_key = task_obj.session_key if task_obj else ""
+
+                    # Fast path: if session_key is still the placeholder after
+                    # 2+ minutes, spawn never succeeded.
+                    if session_key == "cron-pending":
+                        should_fail = True
+                        fail_reason = (
+                            f"Auto-failed: spawn never completed "
+                            f"(session_key still cron-pending after {age_min:.0f} min)"
+                        )
+                    else:
+                        # Normal path: check if the agent process is alive
+                        task_chat = task_obj.task_chat_id if task_obj else ""
+                        check_key = session_key or (
+                            f"task-{task_chat[-8:]}" if task_chat else ""
+                        )
+                        if check_key and not self.agent_runner.is_running(check_key):
                             should_fail = True
                             fail_reason = (
                                 f"Auto-failed: agent process dead after {age_min:.0f} minutes"
