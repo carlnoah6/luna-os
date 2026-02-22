@@ -53,8 +53,11 @@ class OpenClawRunner(AgentRunner):
         Returns the cron job name as the session key.
         """
         name = session_label or f"task-{task_id}"
-        # Schedule 5 seconds from now (minimum viable delay)
-        run_at = (datetime.now(UTC) + timedelta(seconds=5)).strftime(
+        # Schedule 15 seconds from now — must be enough for the cron add
+        # command itself to complete + Gateway to register the job.
+        # 5s was too tight: large prompts take 2-3s to serialize, and
+        # if createdAtMs > schedule.at the job never fires.
+        run_at = (datetime.now(UTC) + timedelta(seconds=15)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
 
