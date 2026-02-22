@@ -36,6 +36,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from datetime import datetime
 from decimal import Decimal
@@ -331,6 +332,15 @@ def main() -> None:
         task_cli(rest)
     elif top == "plan":
         plan_cli(rest)
+    elif top == "check-waiting-todos":
+        from luna_os.check_waiting_todos import check_waiting_todos
+
+        logging.basicConfig(
+            level=logging.INFO,
+            format="[check-todos] %(message)s",
+        )
+        result = check_waiting_todos()
+        print_json(result)
     else:
         print(f"Unknown command: {top}", file=sys.stderr)
         print(__doc__)
