@@ -312,6 +312,93 @@ class Planner:
             except Exception as exc:
                 logger.warning("Notification failed: %s", exc)
 
+    def _send_card(self, chat_id: str, card_data: dict[str, Any]) -> dict[str, Any]:
+        """Send an interactive card. Returns response with message_id."""
+        if self.notifications and chat_id:
+            try:
+                return self.notifications.send_card(chat_id, card_data)
+            except Exception as exc:
+                logger.warning("Card send failed: %s", exc)
+        return {}
+
+    @staticmethod
+    def build_confirm_card(plan: Plan) -> dict[str, Any]:
+        """Build a Feishu interactive card with Confirm/Modify buttons for a draft plan."""
+        steps = plan.steps or []
+        step_lines = []
+        for s in steps:
+            deps = s.depends_on or []
+            dep_str = f"  (after {', '.join(str(d) for d in deps)})" if deps else ""
+            step_lines.append(f"**{s.step_num}.** {s.title or ''}{dep_str}")
+
+        steps_md = "\n".join(step_lines) if step_lines else "(no steps)"
+
+        card: dict[str, Any] = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": f"📋 Plan 确认: {plan.goal[:50]}"},
+                "template": "blue",
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**目标:** {plan.goal}\n**步骤数:** {len(steps)}\n**Plan ID:** {plan.id}",
+                    },
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": steps_md},
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": "⏳ 30 分钟内未确认将自动取消",
+                    },
+                },
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "✅ 确认执行"},
+                            "type": "primary",
+                            "value": {
+                                "action": "plan_confirm",
+                                "chat_id": plan.chat_id,
+                                "plan_id": plan.id,
+                            },
+                        },
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "✏️ 修改步骤"},
+                            "type": "default",
+                            "value": {
+                                "action": "plan_modify",
+                                "chat_id": plan.chat_id,
+                                "plan_id": plan.id,
+                            },
+                        },
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "❌ 取消"},
+                            "type": "danger",
+                            "value": {
+                                "action": "plan_cancel",
+                                "chat_id": plan.chat_id,
+                                "plan_id": plan.id,
+                            },
+                        },
+                    ],
+                },
+            ],
+        }
+        return card
+
     def _send_plan_graph(self, plan: Plan, chat_id: str | None = None) -> None:
         """Generate and send a timeline graph for a plan."""
         if not self.notifications:
@@ -579,10 +666,15 @@ Report results to: {chat_id}
         plan = self.store.create_plan(plan_id, chat_id, goal, steps)
         self.store.update_plan_status(plan_id, "draft")
 
-        plan_text = format_plan(plan)
-        plan_text += "\n\nAwaiting confirmation (30-minute timeout)."
-        plan_text += "\nReply 'confirm' to start, or 'modify' to adjust steps."
-        self._notify(chat_id, plan_text)
+        # Send interactive confirm card (with fallback to text)
+        card = self.build_confirm_card(plan)
+        resp = self._send_card(chat_id, card)
+        if not resp.get("message_id"):
+            # Fallback: plain text if card send fails
+            plan_text = format_plan(plan)
+            plan_text += "\n\nAwaiting confirmation (30-minute timeout)."
+            plan_text += "\nReply 'confirm' to start, or 'modify' to adjust steps."
+            self._notify(chat_id, plan_text)
         self._send_plan_graph(plan, chat_id)
 
         return {
