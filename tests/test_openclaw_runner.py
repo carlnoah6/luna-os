@@ -1,48 +1,56 @@
-"""Tests for OpenClawRunner (isolated session spawning via openclaw agent)."""
+"""Tests for OpenClawRunner (subagent spawning via Gateway RPC)."""
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 from luna_os.agents.openclaw import OpenClawRunner
 
 
 class TestOpenClawRunnerSpawn:
-    """Test that spawn creates isolated sessions via openclaw agent."""
+    """Test that spawn creates subagent sessions via gateway call agent."""
 
-    def test_spawn_calls_agent(self):
+    def test_spawn_calls_gateway_rpc(self):
         runner = OpenClawRunner()
 
         with patch("subprocess.Popen") as mock_popen:
             mock_popen.return_value = MagicMock(pid=12345)
             result = runner.spawn("t1", "do something", "task-label")
 
-        assert result == "task-label"
+        assert result == "agent:main:subagent:task-label"
         mock_popen.assert_called_once()
         cmd = mock_popen.call_args[0][0]
         assert cmd[0] == "openclaw"
-        assert cmd[1] == "agent"
-        assert "--session-id" in cmd
-        assert "task-label" in cmd
-        assert "--message" in cmd
-        assert "do something" in cmd
+        assert cmd[1] == "gateway"
+        assert cmd[2] == "call"
+        assert cmd[3] == "agent"
+        assert "--params" in cmd
+        assert "--expect-final" in cmd
+
+        # Verify params JSON
+        params_idx = cmd.index("--params") + 1
+        params = json.loads(cmd[params_idx])
+        assert params["sessionKey"] == "agent:main:subagent:task-label"
+        assert params["message"] == "do something"
+        assert params["deliver"] is False
+        assert params["lane"] == "subagent"
+        assert "idempotencyKey" in params
 
     def test_spawn_with_reply_chat_id(self):
         runner = OpenClawRunner()
 
-        with patch("subprocess.Popen") as mock_popen:
+        with patch("subprocess.Popen") as mock_popen, \
+             patch.object(runner, "_start_bridge") as mock_bridge:
             mock_popen.return_value = MagicMock(pid=12345)
             runner.spawn(
                 "t2", "prompt", "label",
                 reply_chat_id="oc_abc123",
             )
 
-        cmd = mock_popen.call_args[0][0]
-        assert "--deliver" in cmd
-        assert "--reply-channel" in cmd
-        assert "feishu" in cmd
-        assert "--reply-to" in cmd
-        assert "chat:oc_abc123" in cmd
+        # Bridge started + agent spawned
+        mock_bridge.assert_called_once_with("label", "oc_abc123", "t2")
+        mock_popen.assert_called_once()
 
     def test_spawn_without_reply_chat_id(self):
         runner = OpenClawRunner()
@@ -51,9 +59,8 @@ class TestOpenClawRunnerSpawn:
             mock_popen.return_value = MagicMock(pid=12345)
             runner.spawn("t3", "prompt", "label")
 
-        cmd = mock_popen.call_args[0][0]
-        assert "--deliver" not in cmd
-        assert "--reply-channel" not in cmd
+        # Only agent, no bridge
+        assert mock_popen.call_count == 1
 
     def test_spawn_default_session_label(self):
         runner = OpenClawRunner()
@@ -62,35 +69,34 @@ class TestOpenClawRunnerSpawn:
             mock_popen.return_value = MagicMock(pid=12345)
             result = runner.spawn("my-task-id", "prompt")
 
-        assert result == "task-my-task-id"
-        cmd = mock_popen.call_args[0][0]
-        assert "task-my-task-id" in cmd
+        assert result == "agent:main:subagent:task-my-task-id"
 
 
 class TestOpenClawRunnerIsRunning:
-    """Test is_running checks for running agent process."""
+    """Test is_running checks sessions list."""
 
-    def test_process_running(self):
+    def test_session_active(self):
+        runner = OpenClawRunner()
+        key = "agent:main:subagent:task-abc"
+        with patch("subprocess.run") as m:
+            m.return_value = MagicMock(
+                returncode=0,
+                stdout=f'{{"sessions": ["{key}"]}}',
+                stderr="",
+            )
+            assert runner.is_running(key) is True
+
+    def test_session_not_found(self):
         runner = OpenClawRunner()
         with patch("subprocess.run") as m:
             m.return_value = MagicMock(
-                returncode=0, stdout="12345\n", stderr="",
+                returncode=0,
+                stdout='{"sessions": ["other-key"]}',
+                stderr="",
             )
-            assert runner.is_running("task-abc") is True
+            assert runner.is_running("agent:main:subagent:task-abc") is False
 
-    def test_process_not_running_no_file(self, tmp_path):
-        runner = OpenClawRunner()
-        with patch("subprocess.run") as m, \
-             patch.dict(
-                 "os.environ",
-                 {"OPENCLAW_SESSIONS_DIR": str(tmp_path)},
-             ):
-            m.return_value = MagicMock(
-                returncode=1, stdout="", stderr="",
-            )
-            assert runner.is_running("task-abc") is False
-
-    def test_process_not_running_recent_file(self, tmp_path):
+    def test_sessions_cmd_fails_fallback_to_file(self, tmp_path):
         runner = OpenClawRunner()
         session_file = tmp_path / "task-abc.jsonl"
         session_file.write_text('{"type":"message"}\n')
@@ -100,25 +106,10 @@ class TestOpenClawRunnerIsRunning:
                  "os.environ",
                  {"OPENCLAW_SESSIONS_DIR": str(tmp_path)},
              ):
-            m.return_value = MagicMock(
-                returncode=1, stdout="", stderr="",
-            )
-            assert runner.is_running("task-abc") is True
+            m.side_effect = Exception("sessions failed")
+            assert runner.is_running("agent:main:subagent:task-abc") is True
 
-    def test_pgrep_fails_fallback_to_file(self, tmp_path):
-        runner = OpenClawRunner()
-        session_file = tmp_path / "task-abc.jsonl"
-        session_file.write_text('{"type":"message"}\n')
-
-        with patch("subprocess.run") as m, \
-             patch.dict(
-                 "os.environ",
-                 {"OPENCLAW_SESSIONS_DIR": str(tmp_path)},
-             ):
-            m.side_effect = Exception("pgrep failed")
-            assert runner.is_running("task-abc") is True
-
-    def test_pgrep_fails_no_file(self, tmp_path):
+    def test_sessions_cmd_fails_no_file(self, tmp_path):
         runner = OpenClawRunner()
 
         with patch("subprocess.run") as m, \
@@ -126,5 +117,5 @@ class TestOpenClawRunnerIsRunning:
                  "os.environ",
                  {"OPENCLAW_SESSIONS_DIR": str(tmp_path)},
              ):
-            m.side_effect = Exception("pgrep failed")
-            assert runner.is_running("task-abc") is False
+            m.side_effect = Exception("sessions failed")
+            assert runner.is_running("agent:main:subagent:task-abc") is False
