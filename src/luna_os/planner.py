@@ -496,8 +496,9 @@ Report results to: {chat_id}
                             task_id, prompt, session_label
                         )
                         # Update session_key from placeholder to actual value
+                        # (use update_task to avoid resetting started_at)
                         if session_key:
-                            self.store.start_task(task_id, session_key)
+                            self.store.update_task(task_id, session_key=session_key)
                         spawn_ok = True
                     except Exception as exc:
                         logger.warning("Spawn failed for step %d: %s", step.step_num, exc)
@@ -505,7 +506,10 @@ Report results to: {chat_id}
             # Rollback: if spawn failed, revert task and step to failed state
             # so they don't sit in running/cron-pending forever.
             if not spawn_ok:
-                fail_msg = "Spawn failed: agent process could not be started"
+                if not self.agent_runner:
+                    fail_msg = "Spawn failed: no agent_runner configured"
+                else:
+                    fail_msg = "Spawn failed: agent process could not be started"
                 self.store.fail_step(plan.id, step.step_num, fail_msg)
                 self.store.fail_task(task_id, fail_msg)
                 logger.warning(
