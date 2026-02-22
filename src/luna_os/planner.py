@@ -629,7 +629,7 @@ Report results to: {chat_id}
                 f"[Plan] {plan.goal} -- Step {step.step_num}: {step.title}",
                 source_chat=plan.chat_id,
             )
-            self.store.start_task(task_id, "cron-pending")
+            self.store.start_task(task_id, "spawn-pending")
             self.store.start_step(plan.id, step.step_num, task_id)
 
             spawn_ok = False
@@ -1038,7 +1038,7 @@ Report results to: {chat_id}
                             desc,
                             source_chat=plan.chat_id,
                         )
-                        self.store.start_task(task_id, "cron-pending")
+                        self.store.start_task(task_id, "spawn-pending")
                         self.store.start_step(plan.id, first_pending.step_num, task_id)
                         spawn_ok = True
 

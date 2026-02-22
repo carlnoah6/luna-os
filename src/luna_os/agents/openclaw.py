@@ -1,15 +1,19 @@
 """OpenClaw agent runner — spawns isolated sessions via the Gateway.
 
-Uses ``openclaw agent`` to run isolated sessions directly. The Gateway
-manages the session lifecycle, streaming, and delivery.
+Uses ``openclaw gateway call agent`` to spawn subagent sessions directly
+through the Gateway RPC. Sessions are visible in ``sessions_list``,
+managed by the Gateway lifecycle, and use ~2.3x fewer tokens than
+``openclaw agent`` (no full workspace context).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 from luna_os.agents.base import AgentRunner
@@ -17,11 +21,13 @@ from luna_os.agents.base import AgentRunner
 logger = logging.getLogger(__name__)
 
 # Default path to streaming-bridge.py
-_DEFAULT_BRIDGE = Path.home() / ".openclaw" / "workspace" / "scripts" / "streaming-bridge.py"
+_DEFAULT_BRIDGE = (
+    Path.home() / ".openclaw" / "workspace" / "scripts" / "streaming-bridge.py"
+)
 
 
 class OpenClawRunner(AgentRunner):
-    """Spawn agent sessions via OpenClaw Gateway's cron one-shot mechanism."""
+    """Spawn subagent sessions via Gateway RPC (``openclaw gateway call agent``)."""
 
     def __init__(
         self,
@@ -38,41 +44,41 @@ class OpenClawRunner(AgentRunner):
         session_label: str = "",
         reply_chat_id: str = "",
     ) -> str:
-        """Spawn an isolated agent session via ``openclaw agent``.
+        """Spawn a subagent session via Gateway RPC.
 
-        Runs the agent directly (no cron delay). The Gateway manages
-        the session lifecycle. If *reply_chat_id* is provided, results
-        are delivered to that Feishu chat and a streaming bridge is
-        started for live progress.
+        Calls ``openclaw gateway call agent`` with ``--expect-final``
+        in a background process. The Gateway manages the session
+        lifecycle, and the session is visible in ``sessions_list``.
 
-        Returns the session id used.
+        Returns the session key.
         """
-        name = session_label or f"task-{task_id}"
+        child_id = session_label or f"task-{task_id}"
+        session_key = f"agent:main:subagent:{child_id}"
+
+        params = {
+            "message": prompt,
+            "sessionKey": session_key,
+            "idempotencyKey": str(uuid.uuid4()),
+            "deliver": False,
+            "lane": "subagent",
+            "timeout": 1800,
+        }
 
         cmd = [
-            self._binary, "agent",
-            "--message", prompt,
-            "--session-id", name,
-            "--timeout", "1800",
+            self._binary, "gateway", "call", "agent",
+            "--params", json.dumps(params),
+            "--expect-final",
             "--json",
+            "--timeout", "1810000",  # slightly over agent timeout
         ]
-
-        # Deliver results to Feishu chat if available
-        if reply_chat_id:
-            cmd.extend([
-                "--deliver",
-                "--reply-channel", "feishu",
-                "--reply-to", f"chat:{reply_chat_id}",
-            ])
 
         # Start streaming bridge BEFORE launching agent
         if reply_chat_id:
-            self._start_bridge(name, reply_chat_id, task_id)
+            self._start_bridge(child_id, reply_chat_id, task_id)
 
-        # Run agent in background (non-blocking)
-        log_fh = open(  # noqa: SIM115
-            f"/tmp/agent-spawn-{name}.log", "a"
-        )
+        # Run in background (non-blocking)
+        log_path = f"/tmp/agent-spawn-{child_id}.log"
+        log_fh = open(log_path, "w")  # noqa: SIM115
         proc = subprocess.Popen(
             cmd,
             stdout=log_fh,
@@ -81,30 +87,27 @@ class OpenClawRunner(AgentRunner):
         )
 
         logger.info(
-            "Spawned agent session: name=%s pid=%d task=%s",
-            name, proc.pid, task_id,
+            "Spawned subagent: key=%s pid=%d task=%s",
+            session_key, proc.pid, task_id,
         )
 
-        return name
+        return session_key
 
     def _start_bridge(
-        self, session_label: str, chat_id: str, task_id: str = ""
+        self, session_label: str, chat_id: str, task_id: str = "",
     ) -> None:
-        """Launch streaming-bridge.py in the background.
-
-        The bridge watches for a new session file matching *session_label*
-        and streams output to the Lark *chat_id* via CardKit.
-        """
+        """Launch streaming-bridge.py in the background."""
         if not self._bridge_script.exists():
             logger.warning(
-                "Streaming bridge not found at %s, skipping", self._bridge_script
+                "Streaming bridge not found at %s, skipping",
+                self._bridge_script,
             )
             return
 
         cmd = [
             sys.executable,
             str(self._bridge_script),
-            session_label,  # bridge's find_session_file will search for this
+            session_label,
             chat_id,
             "--timeout", "1800",
         ]
@@ -112,14 +115,12 @@ class OpenClawRunner(AgentRunner):
             cmd.extend(["--task-id", task_id])
 
         try:
-            log_fh = open(  # noqa: SIM115
-                "/tmp/streaming-bridge.log", "a"
-            )
+            log_fh = open("/tmp/streaming-bridge.log", "a")  # noqa: SIM115
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=log_fh,
-                start_new_session=True,  # detach from parent
+                start_new_session=True,
             )
             logger.info(
                 "Started streaming bridge: pid=%d label=%s chat=%s",
@@ -129,38 +130,39 @@ class OpenClawRunner(AgentRunner):
             logger.warning("Failed to start streaming bridge: %s", exc)
 
     def is_running(self, session_key: str) -> bool:
-        """Check if a spawned agent session is still running.
+        """Check if a spawned subagent is still running.
 
-        Checks if an ``openclaw agent`` process with the matching
-        session-id is still alive, or if the session file was recently
-        modified (within 5 minutes).
+        Uses ``openclaw sessions --active 5 --json`` to check if the
+        session was recently active. Falls back to session file check.
         """
-        # Method 1: check for running process
         try:
             result = subprocess.run(
-                ["pgrep", "-f", f"--session-id {session_key}"],
-                capture_output=True, text=True, timeout=5,
+                [self._binary, "sessions", "--active", "5", "--json"],
+                capture_output=True, text=True, timeout=10,
             )
             if result.returncode == 0 and result.stdout.strip():
-                return True
+                return session_key in result.stdout
         except Exception:
             pass
 
-        # Method 2: check session file recency
+        # Fallback: check session file
         return self._check_session_file(session_key)
 
     @staticmethod
     def _check_session_file(session_key: str) -> bool:
-        """Fallback: check if a session file exists and was recently modified."""
+        """Fallback: check if a session file was recently modified."""
         import time
 
         sessions_dir = os.environ.get(
             "OPENCLAW_SESSIONS_DIR",
             str(Path.home() / ".openclaw" / "agents" / "main" / "sessions"),
         )
-        jsonl_path = Path(sessions_dir) / f"{session_key}.jsonl"
+        # Session key format: agent:main:subagent:task-xxx
+        # File might be named by the last segment or by UUID
+        short_key = session_key.rsplit(":", 1)[-1] if ":" in session_key else session_key
+        jsonl_path = Path(sessions_dir) / f"{short_key}.jsonl"
         if jsonl_path.exists():
             age = time.time() - jsonl_path.stat().st_mtime
-            if age < 300:  # Modified within 5 minutes
+            if age < 300:
                 return True
         return False
