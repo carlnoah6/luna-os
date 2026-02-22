@@ -441,6 +441,12 @@ On failure, emit: step.failed with task-id={task_id}
 {task_chat_section}
 ## Parent Chat
 Report results to: {chat_id}
+
+## CRITICAL: Context Budget Rules
+- **Never read entire large files** — use grep/sed to extract only the specific functions you need.
+- **Write files in segments** — use write for a small skeleton first, then append sections. Never try to write >200 lines in a single write call.
+- **Monitor your context** — if you've read many files, summarize findings in a local notes file and avoid re-reading.
+- **Prefer exec+cat/sed over read** for targeted extraction from large source files.
 """
 
     def _start_ready_steps(self, plan: Plan, ready_steps: list[Step]) -> list[tuple[int, bool]]:

@@ -28,7 +28,7 @@ class OpenClawRunner(AgentRunner):
             "--session-id",
             session_id,
             "--timeout",
-            "900",
+            "1800",
             "--message",
             prompt,
         ]
