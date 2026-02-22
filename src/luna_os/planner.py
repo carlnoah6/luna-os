@@ -67,8 +67,14 @@ def _short_desc(text: str, max_len: int = 60) -> str:
 
 def normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
     """Normalize step input to ``{title, prompt, depends_on}`` format."""
-    title = raw.get("title") or raw.get("desc") or raw.get("name") or "Untitled"
-    prompt = raw.get("prompt") or raw.get("detail") or ""
+    title = (
+        raw.get("title")
+        or raw.get("description")
+        or raw.get("desc")
+        or raw.get("name")
+        or "Untitled"
+    )
+    prompt = raw.get("prompt") or raw.get("detail") or raw.get("description") or ""
     depends_on = raw.get("depends_on")
     if depends_on is None:
         depends_on = []
