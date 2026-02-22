@@ -2,13 +2,24 @@
 
 import pytest
 
+from luna_os.agents.base import AgentRunner
 from luna_os.planner import Planner, format_plan, normalize_step
 from tests.memory_store import MemoryBackend
 
 
+class _NoopRunner(AgentRunner):
+    """Minimal agent runner that always succeeds (for tests that don't care)."""
+
+    def spawn(self, task_id: str, prompt: str, session_label: str = "") -> str:
+        return session_label or f"task-{task_id}"
+
+    def is_running(self, session_key: str) -> bool:
+        return True
+
+
 def make_planner() -> tuple[Planner, MemoryBackend]:
     store = MemoryBackend()
-    planner = Planner(store, max_concurrent=6)
+    planner = Planner(store, agent_runner=_NoopRunner(), max_concurrent=6)
     return planner, store
 
 
