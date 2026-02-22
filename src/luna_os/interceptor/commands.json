@@ -1,0 +1,55 @@
+{
+  "$schema": "commands-schema",
+  "version": 1,
+  "commands": [
+    {
+      "id": "dashboard",
+      "patterns": ["仪表盘", "dashboard", "看板", "状态总览", "系统状态"],
+      "handler": "dashboard",
+      "description": "Show system dashboard with task/plan/session stats",
+      "examples": ["打开仪表盘", "看一下dashboard", "系统状态怎么样"]
+    },
+    {
+      "id": "task_list",
+      "patterns": ["任务列表", "task list", "待办", "todo", "看看任务", "有什么任务"],
+      "handler": "task_list",
+      "description": "List tasks with optional status filter",
+      "examples": ["看看待办", "列出所有任务", "有什么活跃任务"]
+    },
+    {
+      "id": "model_switch",
+      "patterns": ["/model", "切换模型", "换模型", "用sonnet", "用opus", "用haiku"],
+      "handler": "model_switch",
+      "description": "Switch the active LLM model",
+      "examples": ["/model sonnet", "切换到opus", "用haiku回答"]
+    },
+    {
+      "id": "new_session",
+      "patterns": ["/new", "新对话", "新会话", "重新开始", "清空上下文"],
+      "handler": "new_session",
+      "description": "Start a fresh conversation session",
+      "examples": ["/new", "开个新对话", "重新开始"]
+    },
+    {
+      "id": "plan_status",
+      "patterns": ["计划状态", "plan status", "计划进度", "plan进度"],
+      "handler": "plan_status",
+      "description": "Show current plan execution status",
+      "examples": ["计划执行到哪了", "plan status"]
+    },
+    {
+      "id": "token_usage",
+      "patterns": ["token用量", "token usage", "消耗了多少token", "花了多少钱", "cost"],
+      "handler": "token_usage",
+      "description": "Show token usage and cost summary",
+      "examples": ["今天用了多少token", "看看花费"]
+    },
+    {
+      "id": "help",
+      "patterns": ["/help", "帮助", "你能做什么", "有什么功能"],
+      "handler": "help",
+      "description": "Show available commands",
+      "examples": ["/help", "你能做什么"]
+    }
+  ]
+}

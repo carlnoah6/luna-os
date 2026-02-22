@@ -12,6 +12,9 @@ requires-python = ">=3.11"
 authors = [{ name = "Carl Li" }]
 dependencies = [
     "psycopg2-binary>=2.9",
+    "sentence-transformers>=3.0",
+    "numpy>=1.26",
+    "aiohttp>=3.9",
 ]
 
 [project.optional-dependencies]

@@ -31,6 +31,10 @@ Usage:
   luna-os plan check-contracts
   luna-os plan list
   luna-os plan find-by-task <task_id>
+
+  luna-os intercept serve [--port 8280] [--upstream URL]
+  luna-os intercept test "message text"
+  luna-os intercept list-commands
 """
 
 from __future__ import annotations
@@ -341,6 +345,10 @@ def main() -> None:
         )
         result = check_waiting_todos()
         print_json(result)
+    elif top == "intercept":
+        from luna_os.interceptor.cli import intercept_cli
+
+        intercept_cli(rest)
     elif top == "streaming-bridge":
         from luna_os.streaming_bridge import main as bridge_main
 
