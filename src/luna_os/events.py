@@ -162,12 +162,14 @@ def process_events(
     store: StorageBackend,
     on_step_done: Any = None,
     on_step_fail: Any = None,
+    on_step_waiting: Any = None,
     limit: int = 20,
 ) -> int:
     """Poll and process events from the queue.
 
     *on_step_done(plan, step_num, result)* and *on_step_fail(plan, step_num, error)*
     are optional callbacks invoked for step/contract completion and failure events.
+    *on_step_waiting(plan, step_num, question)* is called when a step needs user input.
 
     Returns the number of events processed.
     """
@@ -178,7 +180,7 @@ def process_events(
     processed = 0
     for evt in events:
         try:
-            _process_single_event(store, evt, on_step_done, on_step_fail)
+            _process_single_event(store, evt, on_step_done, on_step_fail, on_step_waiting)
             store.ack_event(evt.id)
             processed += 1
         except Exception:
@@ -193,6 +195,7 @@ def _process_single_event(
     evt: Event,
     on_step_done: Any,
     on_step_fail: Any,
+    on_step_waiting: Any = None,
 ) -> None:
     """Dispatch a single event to appropriate handler."""
     etype = evt.event_type
@@ -225,4 +228,10 @@ def _process_single_event(
         plan = store.get_plan(plan_id)
         if plan and on_step_fail:
             on_step_fail(plan, step_num, error)
+
+    elif etype == "step.waiting" and plan_id and step_num is not None:
+        question = payload.get("result", payload.get("question", "waiting for input"))
+        plan = store.get_plan(plan_id)
+        if plan and on_step_waiting:
+            on_step_waiting(plan, step_num, question)
     # contract.progress and contract.start are informational — just ack

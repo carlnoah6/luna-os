@@ -309,8 +309,9 @@ class Planner:
         if self.notifications and chat_id:
             try:
                 self.notifications.send_message(chat_id, text)
+                logger.info("_notify OK: chat=%s text=%s", chat_id, text[:60])
             except Exception as exc:
-                logger.warning("Notification failed: %s", exc)
+                logger.warning("Notification failed for %s: %s", chat_id, exc)
 
     def _notify_main_session(
         self, plan: Plan, event: str, detail: str = "",
@@ -408,26 +409,6 @@ class Planner:
                             "type": "primary",
                             "value": {
                                 "action": "plan_confirm",
-                                "chat_id": plan.chat_id,
-                                "plan_id": plan.id,
-                            },
-                        },
-                        {
-                            "tag": "button",
-                            "text": {"tag": "plain_text", "content": "✏️ 修改步骤"},
-                            "type": "default",
-                            "value": {
-                                "action": "plan_modify",
-                                "chat_id": plan.chat_id,
-                                "plan_id": plan.id,
-                            },
-                        },
-                        {
-                            "tag": "button",
-                            "text": {"tag": "plain_text", "content": "❌ 取消"},
-                            "type": "danger",
-                            "value": {
-                                "action": "plan_cancel",
                                 "chat_id": plan.chat_id,
                                 "plan_id": plan.id,
                             },
@@ -559,6 +540,9 @@ class Planner:
         chat_id = plan.chat_id or ""
         step_num = step.step_num
         task_id = step.task_id or ""
+        ws = os.environ.get(
+            "OPENCLAW_WORKSPACE", "/home/ubuntu/.openclaw/workspace"
+        )
 
         completed = [
             s
@@ -595,9 +579,27 @@ Report progress at each key milestone.
 ## Task ID
 {task_id}
 
-## Reporting
-When done, emit: step.done with task-id={task_id}
-On failure, emit: step.failed with task-id={task_id}
+## Reporting (REQUIRED - session FAILS without this)
+
+**You MUST call one of these as your FINAL action.**
+
+### Success:
+```bash
+cd {ws} && python3 scripts/emit_event.py step.done \\
+  --task-id {task_id} --result "one-line result"
+```
+
+### Failure:
+```bash
+cd {ws} && python3 scripts/emit_event.py step.failed \\
+  --task-id {task_id} --result "error description"
+```
+
+### Waiting for user input:
+```bash
+cd {ws} && python3 scripts/emit_event.py step.waiting \\
+  --task-id {task_id} --result "your question"
+```
 {task_chat_section}
 ## Parent Chat
 Report results to: {chat_id}
@@ -638,6 +640,10 @@ Report results to: {chat_id}
                     try:
                         owner_id = os.environ.get("LARK_OWNER_ID", "")
                         members = [owner_id] if owner_id else []
+                        logger.info(
+                            "Creating task chat: owner_id=%s members=%s",
+                            owner_id or "(empty)", members,
+                        )
                         task_chat_id = self.notifications.create_chat(
                             f"Task {task_id} Step {step.step_num}: {step.title[:30]}",
                             f"Plan step: {step.title}",
@@ -694,6 +700,14 @@ Report results to: {chat_id}
                     plan, "step_spawn_failed",
                     f"❌ Step {step.step_num} spawn failed: {step.title[:60]}",
                 )
+
+        # Send updated plan graph to main chat after state changes
+        if results:
+            plan_fresh = self.store.get_plan(plan.id)
+            if plan_fresh:
+                self._notify(plan_fresh.chat_id, format_plan(plan_fresh))
+                self._send_plan_graph(plan_fresh)
+
         return results
 
     # -- Plan commands ---------------------------------------------------------
@@ -802,6 +816,11 @@ Report results to: {chat_id}
             )
 
         # Notify main session
+        logger.info(
+            "step_done: plan=%s step=%d chat=%s notify=%s",
+            plan.id, step_num, plan.chat_id,
+            "yes" if self.notifications else "no",
+        )
         self._notify_main_session(
             plan, "step_done",
             f"Step {step_num} done: {_short_desc(result, 120)}",
@@ -917,6 +936,47 @@ Report results to: {chat_id}
 
         return {"step_failed": step_num, "error": error[:100]}
 
+    def step_waiting(self, chat_id: str, step_num: int, question: str) -> dict[str, Any]:
+        """Mark a step as waiting for user input.
+
+        The agent emits ``step.waiting`` when it needs information from the
+        user before it can continue.  The step is paused until the user
+        provides the answer and ``step_resume`` is called.
+        """
+        plan = self.store.get_plan_by_chat(chat_id, status_filter="active")
+        if not plan:
+            raise KeyError(f"No active plan found for {chat_id}")
+
+        existing = self.store.get_step(plan.id, step_num)
+        if existing and existing.status.value == "waiting":
+            return {"step_already_waiting": step_num}
+
+        self.store.wait_step(plan.id, step_num, question)
+
+        step = self.store.get_step(plan.id, step_num)
+        if step and step.task_id:
+            task = self.store.get_task(step.task_id)
+            if task:
+                self.store.wait_task(step.task_id, "user_input", question)
+
+        # Notify main chat with question + updated graph
+        self._notify(
+            plan.chat_id,
+            f"⏸️ Step {step_num} 需要你的输入:\n{_short_desc(question, 300)}",
+        )
+        plan = self.store.get_plan(plan.id)  # type: ignore[assignment]
+        if plan:
+            self._send_plan_graph(plan)
+
+        self._notify_main_session(
+            plan, "step_waiting",
+            f"⏸️ Step {step_num} waiting: {_short_desc(question, 120)}",
+        )
+
+        self._update_dashboard("step_waiting")
+
+        return {"step_waiting": step_num, "question": question[:200]}
+
     def replan(
         self,
         chat_id: str,
@@ -935,16 +995,27 @@ Report results to: {chat_id}
         if append:
             next_num = max((s.step_num for s in plan.steps), default=0) + 1
             kept_count = len(plan.steps)
+            # Auto-dependency: new steps depend on the last step in the plan
+            auto_deps = [next_num - 1] if plan.steps else []
         else:
             kept = [s for s in plan.steps if s.status.value in ("done", "running", "failed")]
             next_num = max((s.step_num for s in kept), default=0) + 1
             kept_count = len(kept)
+            # Auto-dependency: new steps depend on the last completed/running/failed step
+            auto_deps = [next_num - 1] if kept else []
             self.store.delete_pending_steps(plan.id)
 
         for i, ns in enumerate(new_steps):
             raw_deps = ns.get("depends_on") or []
             step_num = next_num + i
-            deps = [d + next_num for d in raw_deps if d + next_num != step_num]
+            if raw_deps:
+                # User-provided deps are relative (0-based within new steps), convert to absolute
+                deps = [d + next_num for d in raw_deps if d + next_num != step_num]
+            elif auto_deps:
+                # Auto-deps are already absolute step numbers
+                deps = list(auto_deps)
+            else:
+                deps = []
             self.store.insert_step(plan.id, step_num, ns["title"], ns["prompt"], deps)
 
         # Auto-advance if plan is active
@@ -1139,6 +1210,9 @@ Report results to: {chat_id}
             ),
             on_step_fail=lambda plan, step_num, error: self.step_fail(
                 plan.chat_id, step_num, error
+            ),
+            on_step_waiting=lambda plan, step_num, question: self.step_waiting(
+                plan.chat_id, step_num, question
             ),
         )
 

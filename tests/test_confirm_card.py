@@ -23,23 +23,20 @@ class TestBuildConfirmCard:
         card = Planner.build_confirm_card(plan)
         assert card["header"]["title"]["content"].startswith("📋 Plan 确认")
         assert card["header"]["template"] == "blue"
-        # Must have action element with 3 buttons
+        # Must have action element with 1 confirm button
         actions = [e for e in card["elements"] if e.get("tag") == "action"]
         assert len(actions) == 1
         buttons = actions[0]["actions"]
-        assert len(buttons) == 3
-        # Verify button action values
+        assert len(buttons) == 1
         assert buttons[0]["value"]["action"] == "plan_confirm"
-        assert buttons[1]["value"]["action"] == "plan_modify"
-        assert buttons[2]["value"]["action"] == "plan_cancel"
 
     def test_plan_id_and_chat_id_in_buttons(self):
         plan = _make_plan()
         card = Planner.build_confirm_card(plan)
         actions = [e for e in card["elements"] if e.get("tag") == "action"]
-        for btn in actions[0]["actions"]:
-            assert btn["value"]["chat_id"] == "oc_test"
-            assert btn["value"]["plan_id"] == "p1"
+        btn = actions[0]["actions"][0]
+        assert btn["value"]["chat_id"] == "oc_test"
+        assert btn["value"]["plan_id"] == "p1"
 
     def test_steps_displayed(self):
         plan = _make_plan(n_steps=5)
