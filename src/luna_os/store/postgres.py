@@ -367,9 +367,15 @@ class PostgresBackend(StorageBackend):
             raw_deps = s.get("depends_on") or []
             deps = [d + 1 for d in raw_deps if d + 1 != i]  # filter self-refs
             self._execute(
-                """INSERT INTO plan_steps (plan_id, step_num, title, prompt, status, depends_on)
-                   VALUES (%s, %s, %s, %s, 'pending', %s)""",
-                (plan_id, i, s.get("title", ""), s.get("prompt", ""), deps),
+                """INSERT INTO plan_steps
+                   (plan_id, step_num, title, prompt, status,
+                    depends_on, timeout_minutes)
+                   VALUES (%s, %s, %s, %s, 'pending', %s, %s)""",
+                (
+                    plan_id, i, s.get("title", ""),
+                    s.get("prompt", ""), deps,
+                    s.get("timeout_minutes"),
+                ),
             )
         return self.get_plan(plan_id)  # type: ignore[return-value]
 
@@ -587,13 +593,16 @@ class PostgresBackend(StorageBackend):
         title: str,
         prompt: str,
         depends_on: list[int] | None = None,
+        timeout_minutes: int | None = None,
     ) -> None:
         # Filter out self-referencing dependencies
         clean_deps = [d for d in (depends_on or []) if d != step_num]
         self._execute(
-            """INSERT INTO plan_steps (plan_id, step_num, title, prompt, status, depends_on)
-               VALUES (%s, %s, %s, %s, 'pending', %s)""",
-            (plan_id, step_num, title, prompt, clean_deps),
+            """INSERT INTO plan_steps
+               (plan_id, step_num, title, prompt, status,
+                depends_on, timeout_minutes)
+               VALUES (%s, %s, %s, %s, 'pending', %s, %s)""",
+            (plan_id, step_num, title, prompt, clean_deps, timeout_minutes),
         )
 
     # -- Events ----------------------------------------------------------------

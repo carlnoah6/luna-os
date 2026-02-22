@@ -17,6 +17,7 @@ class FakeRunner(AgentRunner):
     def spawn(
         self, task_id: str, prompt: str,
         session_label: str = "", reply_chat_id: str = "",
+        timeout_minutes: int | None = None,
     ) -> str:
         if self._fail:
             raise RuntimeError("simulated spawn failure")

@@ -133,6 +133,7 @@ class Step:
     task_id: str | None = None
     result: str | None = None
     depends_on: list[int] = field(default_factory=list)
+    timeout_minutes: int | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
 

@@ -36,6 +36,7 @@ class OpenClawRunner(AgentRunner):
         prompt: str,
         session_label: str = "",
         reply_chat_id: str = "",
+        timeout_minutes: int | None = None,
     ) -> str:
         """Spawn a subagent session via Gateway RPC.
 
@@ -48,13 +49,15 @@ class OpenClawRunner(AgentRunner):
         child_id = session_label or f"task-{task_id}"
         session_key = f"agent:main:subagent:{child_id}"
 
+        timeout_sec = (timeout_minutes or 30) * 60
+
         params = {
             "message": prompt,
             "sessionKey": session_key,
             "idempotencyKey": str(uuid.uuid4()),
             "deliver": False,
             "lane": "subagent",
-            "timeout": 1800,
+            "timeout": timeout_sec,
         }
 
         cmd = [
@@ -62,7 +65,7 @@ class OpenClawRunner(AgentRunner):
             "--params", json.dumps(params),
             "--expect-final",
             "--json",
-            "--timeout", "1810000",  # slightly over agent timeout
+            "--timeout", str(timeout_sec + 10000),  # slightly over agent timeout
         ]
 
         # Start streaming bridge BEFORE launching agent
