@@ -308,7 +308,7 @@ class Planner:
                 "paused": " [Paused]",
             }.get(plan.status.value if hasattr(plan.status, "value") else str(plan.status), "")
             title = f"Plan: {(plan.goal or '')[:80]}{status_label}"
-            html = generate_html(steps_data, title)
+            html = generate_html(steps_data, title, subtitle=plan.id)
             out_dir = tempfile.mkdtemp(prefix="plan-graph-")
             try:
                 import os
