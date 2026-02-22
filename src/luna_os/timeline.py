@@ -178,7 +178,7 @@ phased.forEach(s => {{
 
 const nodeW = 200, gapY = 10, phaseGap = 90, labelH = 36;
 const COLS_PER_ROW = 3, svgPad = 60, wrapMargin = 30, topPad = 60;
-const arrowLineSpacing = 8, baseRowGap = 30;
+const arrowLineSpacing = 8, baseRowGap = 50;
 const graph = document.getElementById('graph');
 
 // --- Pass 1: create nodes off-screen to measure heights ---
@@ -470,10 +470,12 @@ steps.forEach(s => {{
             if (!crossRowArrowIdx[gapKey]) crossRowArrowIdx[gapKey] = 0;
             const vOffset = crossRowArrowIdx[gapKey] * arrowLineSpacing;
             crossRowArrowIdx[gapKey]++;
-            // Find the vertical midpoint between the two rows
+            // Find the gap between rows — route arrows above the second row
             const fromBottom = from.bottom || from.cy + 20;
             const toTop = to.top || to.cy - 20;
-            const gapMid = (fromBottom + toTop) / 2;
+            // Place the horizontal segment just below the first row
+            // (30% into the gap, not 50%) to avoid overlapping Phase labels
+            const gapMid = fromBottom + (toTop - fromBottom) * 0.25;
             // Stay close: extend only 20px beyond the rightmost node
             const margin = 20 + vOffset;
             const turnX = Math.max(x1, x2) + margin;
