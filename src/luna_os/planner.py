@@ -326,14 +326,22 @@ class Planner:
             steps_data = steps_to_graph_data(plan)
             if not steps_data:
                 return
-            status_label = {
-                "active": "",
-                "completed": " [Completed]",
-                "cancelled": " [Cancelled]",
-                "draft": " [Draft]",
-                "paused": " [Paused]",
-            }.get(plan.status.value if hasattr(plan.status, "value") else str(plan.status), "")
-            title = f"Plan: {(plan.goal or '')[:80]}{status_label}"
+            status_icon = {
+                "active": "▶️",
+                "completed": "✅",
+                "cancelled": "🚫",
+                "draft": "📝",
+                "paused": "⏸️",
+            }.get(
+                plan.status.value
+                if hasattr(plan.status, "value")
+                else str(plan.status),
+                "",
+            )
+            goal_text = (plan.goal or "")[:80]
+            title = (
+                f"{status_icon} {goal_text}" if status_icon else goal_text
+            )
             html = generate_html(steps_data, title, subtitle=plan.id)
             out_dir = tempfile.mkdtemp(prefix="plan-graph-")
             try:
