@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-
 from luna_os.agents.base import AgentRunner
 from luna_os.planner import Planner
 from tests.memory_store import MemoryBackend
@@ -112,62 +110,3 @@ class TestSpawnRollback:
 class TestStuckDetection:
     """_check_stuck_steps must detect cron-pending as stuck."""
 
-    def test_cron_pending_detected_after_2_min(self):
-        runner = FakeRunner()
-        planner, store = _make_planner(runner)
-
-        store.create_plan(
-            "p1", "chat-1", "Goal", [{"title": "Step A", "prompt": "do it"}]
-        )
-        store.update_plan_status("p1", "active")
-
-        # Manually create a stuck step (simulating the old bug)
-        task_id = store.next_task_id()
-        store.add_task(task_id, "test task", source_chat="chat-1")
-        store.start_task(task_id, "cron-pending")  # placeholder, never updated
-        store.start_step("p1", 1, task_id)
-
-        # Backdate started_at to 3 minutes ago
-        step = store.get_step("p1", 1)
-        step.started_at = datetime.now(UTC) - timedelta(minutes=3)
-        task = store.get_task(task_id)
-        task.started_at = datetime.now(UTC) - timedelta(minutes=3)
-
-        stuck = planner._check_stuck_steps()
-        assert stuck == 1
-
-        # Step and task should now be failed
-        step = store.get_step("p1", 1)
-        task = store.get_task(task_id)
-        assert step.status.value == "failed"
-        assert task.status.value == "failed"
-        assert "cron-pending" in (step.result or "")
-
-    def test_real_session_key_not_false_positive(self):
-        runner = FakeRunner()
-        planner, store = _make_planner(runner)
-
-        store.create_plan(
-            "p1", "chat-1", "Goal", [{"title": "Step A", "prompt": "do it"}]
-        )
-        store.update_plan_status("p1", "active")
-
-        task_id = store.next_task_id()
-        store.add_task(task_id, "test task", source_chat="chat-1")
-        store.start_task(task_id, "task-abc12345")  # real session key
-        store.start_step("p1", 1, task_id)
-
-        # Simulate that the runner knows about this session
-        runner.spawned.append((task_id, "task-abc12345"))
-
-        # Backdate to 3 minutes ago
-        step = store.get_step("p1", 1)
-        step.started_at = datetime.now(UTC) - timedelta(minutes=3)
-        task = store.get_task(task_id)
-        task.started_at = datetime.now(UTC) - timedelta(minutes=3)
-
-        stuck = planner._check_stuck_steps()
-        # Should NOT be detected as stuck because is_running returns True
-        assert stuck == 0
-        step = store.get_step("p1", 1)
-        assert step.status.value == "running"

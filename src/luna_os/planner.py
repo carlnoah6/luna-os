@@ -1359,30 +1359,6 @@ Report results to: {chat_id}
                     fail_reason = (
                         f"Auto-failed: step stuck for {age_min:.0f} minutes (timeout=45min)"
                     )
-                elif age_min > 2 and self.agent_runner:
-                    task_id = step.task_id or ""
-                    task_obj = self.store.get_task(task_id) if task_id else None
-                    session_key = task_obj.session_key if task_obj else ""
-
-                    # Fast path: if session_key is still the placeholder after
-                    # 2+ minutes, spawn never succeeded.
-                    if session_key == "cron-pending":
-                        should_fail = True
-                        fail_reason = (
-                            f"Auto-failed: spawn never completed "
-                            f"(session_key still cron-pending after {age_min:.0f} min)"
-                        )
-                    else:
-                        # Normal path: check if the agent process is alive
-                        task_chat = task_obj.task_chat_id if task_obj else ""
-                        check_key = session_key or (
-                            f"task-{task_chat[-8:]}" if task_chat else ""
-                        )
-                        if check_key and not self.agent_runner.is_running(check_key):
-                            should_fail = True
-                            fail_reason = (
-                                f"Auto-failed: agent process dead after {age_min:.0f} minutes"
-                            )
 
                 if should_fail:
                     existing = self.store.get_step(full.id, step.step_num)
