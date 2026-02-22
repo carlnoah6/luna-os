@@ -50,7 +50,7 @@ def generate_html(steps_data: list[dict[str, Any]], title: str = "Plan Timeline"
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
     background: #fafbfc;
     padding: 32px;
 }}
