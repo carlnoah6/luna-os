@@ -579,6 +579,14 @@ Report progress at each key milestone.
 ## Task ID
 {task_id}
 
+## Progress Updates (IMPORTANT)
+**Output text between tool calls** to show your progress. Do NOT just
+think and call tools silently — write a brief text message after each
+key action so the streaming card shows what you are doing. Example:
+- "Found 9592 primes, now computing the sum..."
+- "Matrix multiplication done, computing eigenvalues..."
+This makes your work visible in real-time.
+
 ## Reporting (REQUIRED - session FAILS without this)
 
 **You MUST call one of these as your FINAL action.**
