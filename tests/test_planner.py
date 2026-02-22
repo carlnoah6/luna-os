@@ -3,7 +3,7 @@
 import pytest
 
 from luna_os.agents.base import AgentRunner
-from luna_os.planner import Planner, format_plan, normalize_step
+from luna_os.planner import Planner, format_plan, normalize_step, validate_steps
 from tests.memory_store import MemoryBackend
 
 
@@ -304,6 +304,52 @@ class TestNormalizeStep:
     def test_normalize_deps_int(self):
         step = normalize_step({"title": "X", "depends_on": 0})
         assert step["depends_on"] == [0]
+
+
+class TestValidateSteps1Indexed:
+    """validate_steps should auto-detect and convert 1-indexed depends_on."""
+
+    def test_1indexed_deps_converted(self):
+        steps = [
+            {"title": "A", "depends_on": []},
+            {"title": "B", "depends_on": [1]},
+            {"title": "C", "depends_on": [2]},
+            {"title": "D", "depends_on": [2]},
+        ]
+        result = validate_steps(steps)
+        # After conversion: B depends on index 0, C/D depend on index 1
+        assert result[0]["depends_on"] == []
+        assert result[1]["depends_on"] == [0]
+        assert result[2]["depends_on"] == [1]
+        assert result[3]["depends_on"] == [1]
+
+    def test_0indexed_deps_unchanged(self):
+        steps = [
+            {"title": "A", "depends_on": []},
+            {"title": "B", "depends_on": [0]},
+            {"title": "C", "depends_on": [1]},
+        ]
+        result = validate_steps(steps)
+        assert result[1]["depends_on"] == [0]
+        assert result[2]["depends_on"] == [1]
+
+    def test_1indexed_start_only_step1(self):
+        """Issue #18 repro: only Step 1 should start, not Step 2/3."""
+        planner, store = make_planner()
+        planner.init(
+            "chat-1",
+            "Goal",
+            [
+                {"title": "Step 1", "depends_on": []},
+                {"title": "Step 2", "depends_on": [1]},
+                {"title": "Step 3", "depends_on": [2]},
+                {"title": "Step 4", "depends_on": [2]},
+            ],
+        )
+        result = planner.start("chat-1")
+        # Only Step 1 should be started (no deps)
+        assert result["parallel_steps"] == [1]
+        assert result["spawned"] == [True]
 
 
 class TestFormatPlan:
