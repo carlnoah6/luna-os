@@ -120,38 +120,94 @@ class TestOpenClawRunnerSpawn:
             )
             result = runner.spawn("my-task-id", "prompt")
 
-        # Default label is task-{task_id}
         assert result == "task-my-task-id"
         cmd = mock_run.call_args[0][0]
         assert "task-my-task-id" in cmd
 
 
 class TestOpenClawRunnerIsRunning:
-    """Test is_running checks session file activity."""
+    """Test is_running checks cron job list."""
 
-    def test_is_running_no_file(self, tmp_path):
-        runner = OpenClawRunner()
-        with patch.dict("os.environ", {"OPENCLAW_SESSIONS_DIR": str(tmp_path)}):
-            assert runner.is_running("nonexistent") is False
+    @staticmethod
+    def _cron_output(jobs):
+        return json.dumps({"jobs": jobs})
 
-    def test_is_running_recent_file(self, tmp_path):
+    def test_job_exists_enabled(self):
         runner = OpenClawRunner()
-        session_file = tmp_path / "test-session.jsonl"
+        out = self._cron_output([
+            {"name": "task-abc", "enabled": True, "state": {"lastStatus": "ok"}},
+        ])
+        with patch("subprocess.run") as m:
+            m.return_value = MagicMock(returncode=0, stdout=out, stderr="")
+            assert runner.is_running("task-abc") is True
+
+    def test_job_not_found(self):
+        runner = OpenClawRunner()
+        out = self._cron_output([
+            {"name": "other-task", "enabled": True, "state": {}},
+        ])
+        with patch("subprocess.run") as m:
+            m.return_value = MagicMock(returncode=0, stdout=out, stderr="")
+            assert runner.is_running("task-abc") is False
+
+    def test_job_disabled(self):
+        runner = OpenClawRunner()
+        out = self._cron_output([
+            {"name": "task-abc", "enabled": False, "state": {"lastStatus": "ok"}},
+        ])
+        with patch("subprocess.run") as m:
+            m.return_value = MagicMock(returncode=0, stdout=out, stderr="")
+            assert runner.is_running("task-abc") is False
+
+    def test_job_errored_with_run(self):
+        runner = OpenClawRunner()
+        out = self._cron_output([
+            {"name": "task-abc", "enabled": True, "state": {"lastStatus": "error", "lastRunAtMs": 123}},
+        ])
+        with patch("subprocess.run") as m:
+            m.return_value = MagicMock(returncode=0, stdout=out, stderr="")
+            assert runner.is_running("task-abc") is False
+
+    def test_job_pending_no_run_yet(self):
+        runner = OpenClawRunner()
+        out = self._cron_output([
+            {"name": "task-abc", "enabled": True, "state": {}},
+        ])
+        with patch("subprocess.run") as m:
+            m.return_value = MagicMock(returncode=0, stdout=out, stderr="")
+            assert runner.is_running("task-abc") is True
+
+    def test_cron_list_fails_fallback_to_file(self, tmp_path):
+        runner = OpenClawRunner()
+        session_file = tmp_path / "task-abc.jsonl"
         session_file.write_text('{"type":"message"}\n')
 
-        with patch.dict("os.environ", {"OPENCLAW_SESSIONS_DIR": str(tmp_path)}):
-            assert runner.is_running("test-session") is True
+        with patch("subprocess.run") as m, \
+             patch.dict("os.environ", {"OPENCLAW_SESSIONS_DIR": str(tmp_path)}):
+            m.side_effect = Exception("cron list failed")
+            assert runner.is_running("task-abc") is True
 
-    def test_is_running_stale_file(self, tmp_path):
-        import os
-        import time
-
+    def test_cron_list_fails_no_file(self, tmp_path):
         runner = OpenClawRunner()
-        session_file = tmp_path / "old-session.jsonl"
-        session_file.write_text('{"type":"message"}\n')
-        # Set mtime to 10 minutes ago
-        old_time = time.time() - 600
-        os.utime(session_file, (old_time, old_time))
 
-        with patch.dict("os.environ", {"OPENCLAW_SESSIONS_DIR": str(tmp_path)}):
-            assert runner.is_running("old-session") is False
+        with patch("subprocess.run") as m, \
+             patch.dict("os.environ", {"OPENCLAW_SESSIONS_DIR": str(tmp_path)}):
+            m.side_effect = Exception("cron list failed")
+            assert runner.is_running("task-abc") is False
+
+    def test_empty_job_list(self):
+        runner = OpenClawRunner()
+        out = self._cron_output([])
+        with patch("subprocess.run") as m:
+            m.return_value = MagicMock(returncode=0, stdout=out, stderr="")
+            assert runner.is_running("task-abc") is False
+
+    def test_cron_list_returns_plain_list(self):
+        """Handle case where cron list returns a plain array instead of {jobs:[]}."""
+        runner = OpenClawRunner()
+        out = json.dumps([
+            {"name": "task-abc", "enabled": True, "state": {"lastStatus": "ok"}},
+        ])
+        with patch("subprocess.run") as m:
+            m.return_value = MagicMock(returncode=0, stdout=out, stderr="")
+            assert runner.is_running("task-abc") is True

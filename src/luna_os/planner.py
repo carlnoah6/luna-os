@@ -309,8 +309,9 @@ class Planner:
         if self.notifications and chat_id:
             try:
                 self.notifications.send_message(chat_id, text)
+                logger.info("_notify OK: chat=%s text=%s", chat_id, text[:60])
             except Exception as exc:
-                logger.warning("Notification failed: %s", exc)
+                logger.warning("Notification failed for %s: %s", chat_id, exc)
 
     def _notify_main_session(
         self, plan: Plan, event: str, detail: str = "",
@@ -408,26 +409,6 @@ class Planner:
                             "type": "primary",
                             "value": {
                                 "action": "plan_confirm",
-                                "chat_id": plan.chat_id,
-                                "plan_id": plan.id,
-                            },
-                        },
-                        {
-                            "tag": "button",
-                            "text": {"tag": "plain_text", "content": "✏️ 修改步骤"},
-                            "type": "default",
-                            "value": {
-                                "action": "plan_modify",
-                                "chat_id": plan.chat_id,
-                                "plan_id": plan.id,
-                            },
-                        },
-                        {
-                            "tag": "button",
-                            "text": {"tag": "plain_text", "content": "❌ 取消"},
-                            "type": "danger",
-                            "value": {
-                                "action": "plan_cancel",
                                 "chat_id": plan.chat_id,
                                 "plan_id": plan.id,
                             },
@@ -595,9 +576,16 @@ Report progress at each key milestone.
 ## Task ID
 {task_id}
 
-## Reporting
-When done, emit: step.done with task-id={task_id}
-On failure, emit: step.failed with task-id={task_id}
+## Reporting (MANDATORY — do this BEFORE your final reply)
+When done, run:
+```bash
+cd /home/ubuntu/.openclaw/workspace && python3 scripts/emit_event.py step.done --task-id {task_id} --result "your one-line result summary"
+```
+On failure, run:
+```bash
+cd /home/ubuntu/.openclaw/workspace && python3 scripts/emit_event.py step.failed --task-id {task_id} --result "error description"
+```
+You MUST execute one of these commands. Without it, the plan cannot advance.
 {task_chat_section}
 ## Parent Chat
 Report results to: {chat_id}
@@ -638,6 +626,10 @@ Report results to: {chat_id}
                     try:
                         owner_id = os.environ.get("LARK_OWNER_ID", "")
                         members = [owner_id] if owner_id else []
+                        logger.info(
+                            "Creating task chat: owner_id=%s members=%s",
+                            owner_id or "(empty)", members,
+                        )
                         task_chat_id = self.notifications.create_chat(
                             f"Task {task_id} Step {step.step_num}: {step.title[:30]}",
                             f"Plan step: {step.title}",
@@ -802,6 +794,11 @@ Report results to: {chat_id}
             )
 
         # Notify main session
+        logger.info(
+            "step_done: plan=%s step=%d chat=%s notify=%s",
+            plan.id, step_num, plan.chat_id,
+            "yes" if self.notifications else "no",
+        )
         self._notify_main_session(
             plan, "step_done",
             f"Step {step_num} done: {_short_desc(result, 120)}",

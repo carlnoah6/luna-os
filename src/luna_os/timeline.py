@@ -479,8 +479,8 @@ steps.forEach(s => {{
             // Stay close: extend only 20px beyond the rightmost node
             const margin = 20 + vOffset;
             const turnX = Math.max(x1, x2) + margin;
-            // Offset the descent line on the left so multiple arrows don't overlap
-            const descentX = x2 - 6 - vOffset;
+            // Offset the descent line further left to leave room for arrowheads
+            const descentX = x2 - 20 - vOffset;
             path.setAttribute('d',
                 `M${{x1}},${{y1}} H${{turnX}} `
                 + `V${{gapMid}} H${{descentX}} V${{y2}} H${{x2}}`);

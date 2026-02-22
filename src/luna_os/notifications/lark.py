@@ -126,9 +126,11 @@ class LarkProvider(NotificationProvider):
 
         Pass ``restrict_messaging=False`` to allow all members to post.
         """
+        import sys
+        print(f"[create_chat] members={members}", file=sys.stderr, flush=True)
         data = self._api_request(
             "POST",
-            "/im/v1/chats?set_bot_manager=true",
+            "/im/v1/chats?set_bot_manager=true&user_id_type=open_id",
             body={
                 "name": name,
                 "description": description,
@@ -139,8 +141,25 @@ class LarkProvider(NotificationProvider):
             },
         )
         chat_id = data.get("chat_id", "")
+        print(f"[create_chat] created={chat_id}", file=sys.stderr, flush=True)
         if chat_id and restrict_messaging:
             self.set_moderation(chat_id, "moderator_list")
+        # Verify members were added
+        if chat_id and members:
+            try:
+                info = self._api_request("GET", f"/im/v1/chats/{chat_id}")
+                user_count = info.get("user_count", 0)
+                print(f"[create_chat] user_count={user_count}", file=sys.stderr, flush=True)
+                if user_count == 0 and members:
+                    # Members weren't added during creation, add them explicitly
+                    print("[create_chat] Adding members explicitly", file=sys.stderr, flush=True)
+                    self._api_request(
+                        "POST",
+                        f"/im/v1/chats/{chat_id}/members?member_id_type=open_id",
+                        body={"id_list": members},
+                    )
+            except Exception as exc:
+                print(f"[create_chat] verify/add failed: {exc}", file=sys.stderr, flush=True)
         return chat_id
 
     def set_moderation(self, chat_id: str, setting: str = "moderator_list") -> bool:
