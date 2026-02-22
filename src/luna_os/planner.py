@@ -77,6 +77,26 @@ def normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
     return {"title": title, "prompt": prompt, "depends_on": depends_on}
 
 
+def resolve_title_deps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert string title references in depends_on to 0-indexed offsets."""
+    title_to_idx: dict[str, int] = {}
+    for i, s in enumerate(steps):
+        title_to_idx[s.get("title", "")] = i
+
+    for s in steps:
+        deps = s.get("depends_on") or []
+        resolved: list[int] = []
+        for d in deps:
+            if isinstance(d, str):
+                idx = title_to_idx.get(d)
+                if idx is not None:
+                    resolved.append(idx)
+            else:
+                resolved.append(d)
+        s["depends_on"] = resolved
+    return steps
+
+
 def validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Validate and fix step dependencies.
 
@@ -490,7 +510,7 @@ Report results to: {chat_id}
         if existing:
             raise ValueError(f"Active plan already exists: {existing.id} ({existing.goal})")
 
-        steps = validate_steps([normalize_step(s) for s in steps_raw])
+        steps = validate_steps(resolve_title_deps([normalize_step(s) for s in steps_raw]))
         if not steps:
             raise ValueError("No steps provided")
 
@@ -680,7 +700,7 @@ Report results to: {chat_id}
         if not plan:
             raise KeyError(f"No plan found for {chat_id}")
 
-        new_steps = validate_steps([normalize_step(s) for s in new_steps_raw])
+        new_steps = validate_steps(resolve_title_deps([normalize_step(s) for s in new_steps_raw]))
 
         if append:
             next_num = max((s.step_num for s in plan.steps), default=0) + 1
