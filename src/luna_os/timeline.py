@@ -30,18 +30,22 @@ def steps_to_graph_data(plan: Plan, estimate_model_fn=None) -> list[dict[str, An
 
         # Classify task based on keywords
         prompt_lower = (s.prompt or s.title or "").lower()
+        title_lower = (s.title or "").lower()
         hard_kw = ("architect", "design system", "reverse engineer",
                    "analyze complex", "redesign", "方案设计", "架构")
         code_kw = ("implement", "write code", "fix bug", "debug", "test",
-                   "pr ", "pull request", "github", "代码", "重构", "修复")
+                   "pr ", "pull request", "github", "代码", "重构", "修复", "实现")
         cn_kw = ("中文", "翻译", "总结", "报告", "文档", "调研",
                  "搜索", "写作", "摘要")
 
-        if any(kw in prompt_lower for kw in hard_kw):
+        # Check both prompt and title
+        text_to_check = prompt_lower + " " + title_lower
+        
+        if any(kw in text_to_check for kw in hard_kw):
             category = "架构"
-        elif any(kw in prompt_lower for kw in code_kw):
+        elif any(kw in text_to_check for kw in code_kw):
             category = "代码"
-        elif any(kw in prompt_lower for kw in cn_kw):
+        elif any(kw in text_to_check for kw in cn_kw):
             category = "中文"
         else:
             category = "通用"
