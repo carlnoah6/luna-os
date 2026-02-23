@@ -29,24 +29,72 @@ def steps_to_graph_data(plan: Plan, estimate_model_fn=None) -> list[dict[str, An
         title = raw_title[:50] + ("\u2026" if len(raw_title) > 50 else "")
 
         # Classify task based on keywords
-        prompt_lower = (s.prompt or s.title or "").lower()
-        title_lower = (s.title or "").lower()
-        hard_kw = ("architect", "design system", "reverse engineer",
-                   "analyze complex", "redesign", "方案设计", "架构")
-        code_kw = ("implement", "write code", "fix bug", "debug", "test",
-                   "pr ", "pull request", "github", "代码", "重构", "修复", "实现")
-        cn_kw = ("中文", "翻译", "总结", "报告", "文档", "调研",
-                 "搜索", "写作", "摘要")
-
-        # Check both prompt and title
-        text_to_check = prompt_lower + " " + title_lower
+        # Combine title and prompt for comprehensive matching
+        text_to_check = ((s.title or "") + " " + (s.prompt or "")).lower()
         
-        if any(kw in text_to_check for kw in hard_kw):
+        # Architecture/Design tasks (highest priority - most specific)
+        # These are complex, high-level design tasks requiring deep thinking
+        arch_kw = (
+            # English
+            "architect", "architecture", "design system", "system design",
+            "reverse engineer", "analyze complex", "redesign", "design pattern",
+            "infrastructure", "scalability", "distributed system",
+            # Chinese
+            "架构", "方案设计", "系统设计", "技术方案", "设计模式",
+        )
+        
+        # Code implementation tasks (medium-high priority)
+        # These involve writing, modifying, or testing code
+        # Note: Avoid overly broad terms like "编程" (programming) which can match
+        # "编程语言" (programming language) in research tasks
+        code_kw = (
+            # English - implementation
+            "implement", "write code", "create function", "build feature",
+            "develop code", "program code", "script", "coding",
+            # English - modification
+            "fix bug", "debug", "refactor", "optimize code",
+            "modify code", "update code", "patch",
+            # English - testing
+            "unit test", "integration test", "write test",
+            # English - version control
+            "pull request", "github", "git",
+            # Chinese - implementation (be specific to avoid false positives)
+            "实现", "开发", "写代码", "编写代码", "写程序",
+            "写函数", "写脚本", "创建函数",
+            # Chinese - modification
+            "重构", "修复bug", "调试代码", "优化代码",
+            # Chinese - testing
+            "单元测试", "集成测试",
+        )
+        
+        # Chinese language tasks (medium priority)
+        # These require Chinese language processing or output
+        # Use more specific phrases to avoid conflicts
+        cn_kw = (
+            "中文总结", "中文回答", "中文输出", "用中文",
+            "翻译", "摘要", "概括",
+            "调研", "搜索", "查找", "收集资料",
+        )
+        
+        # Classification with priority order
+        # Special case: if both code and Chinese keywords match, check which is more dominant
+        has_arch = any(kw in text_to_check for kw in arch_kw)
+        has_code = any(kw in text_to_check for kw in code_kw)
+        has_cn = any(kw in text_to_check for kw in cn_kw)
+        
+        if has_arch:
             category = "架构"
-        elif any(kw in text_to_check for kw in code_kw):
+        elif has_code and not has_cn:
+            # Pure code task
             category = "代码"
-        elif any(kw in text_to_check for kw in cn_kw):
+        elif has_cn and not has_code:
+            # Pure Chinese task
             category = "中文"
+        elif has_code and has_cn:
+            # Both matched - count which has more matches
+            code_count = sum(1 for kw in code_kw if kw in text_to_check)
+            cn_count = sum(1 for kw in cn_kw if kw in text_to_check)
+            category = "代码" if code_count > cn_count else "中文"
         else:
             category = "通用"
 
