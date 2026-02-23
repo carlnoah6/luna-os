@@ -670,12 +670,13 @@ bash pty:true workdir:/tmp/myproject command:"codex exec 'implement feature X'"
 
 **How to call Claude Code** (simpler, no git required):
 ```bash
-# Use -p for non-interactive output
-bash pty:true workdir:/path/to/project command:"claude -p 'implement feature X'"
+# Use -p for non-interactive output + --dangerously-skip-permissions to avoid approval prompts
+bash pty:true workdir:/path/to/project command:"claude --dangerously-skip-permissions -p 'implement feature X'"
 ```
 
-**CRITICAL**: Always use `pty:true` when calling Codex or Claude Code.
-Without PTY, the agent will hang or produce broken output.
+**CRITICAL**: 
+- Always use `pty:true` when calling Codex or Claude Code (without PTY, the agent will hang)
+- Always use `--dangerously-skip-permissions` with Claude Code (to avoid interactive approval prompts)
 """
 
         task_chat_section = ""
