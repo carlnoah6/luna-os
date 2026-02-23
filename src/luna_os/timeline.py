@@ -16,7 +16,7 @@ from luna_os.types import Plan
 
 def steps_to_graph_data(plan: Plan, estimate_model_fn=None) -> list[dict[str, Any]]:
     """Convert a plan's steps into the data format needed for the timeline graph.
-    
+
     Args:
         plan: The plan to convert
         estimate_model_fn: Optional function to estimate model for a step (Step -> str)
