@@ -779,16 +779,28 @@ class PostgresBackend(StorageBackend):
             fetch="all",
         )
         
-        # Get average completion time
+        # Get average completion time from logs
+        # (time between plan_started and plan_completed events)
         avg_time = self._execute(
-            f"""SELECT AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/60) as avg_minutes
-                FROM plans
-                {where_sql} {'AND' if where_sql else 'WHERE'} completed_at IS NOT NULL""",
+            f"""SELECT AVG(
+                    EXTRACT(EPOCH FROM (
+                        (SELECT timestamp FROM plan_execution_logs 
+                         WHERE plan_id = p.id AND event_type = 'plan_completed' 
+                         ORDER BY timestamp DESC LIMIT 1)
+                        -
+                        (SELECT timestamp FROM plan_execution_logs 
+                         WHERE plan_id = p.id AND event_type = 'plan_started' 
+                         ORDER BY timestamp LIMIT 1)
+                    )) / 60
+                ) as avg_minutes
+                FROM plans p
+                {where_sql}
+                {'AND' if where_sql else 'WHERE'} status = 'completed'""",
             tuple(params),
             fetch="one",
         )
         
         return {
             'status_counts': {r['status']: r['count'] for r in (status_counts or [])},
-            'avg_completion_minutes': avg_time['avg_minutes'] if avg_time else None,
+            'avg_completion_minutes': avg_time['avg_minutes'] if avg_time and avg_time['avg_minutes'] else None,
         }
