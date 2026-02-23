@@ -243,6 +243,13 @@ def task_cli(args: list[str]) -> None:
 
 def plan_cli(args: list[str]) -> None:
     """Handle 'plan' subcommands."""
+    # Configure logging for planner operations
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        force=True,  # Override any existing configuration
+    )
+    
     if not args:
         print("Usage: luna-os plan <command> [args...]")
         sys.exit(1)
