@@ -22,11 +22,31 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
         deps = [d for d in (s.depends_on or []) if d != s.step_num]
         raw_title = s.title or f"Step {s.step_num}"
         title = raw_title[:50] + ("\u2026" if len(raw_title) > 50 else "")
+        
+        # Classify task based on keywords
+        prompt_lower = (s.prompt or s.title or "").lower()
+        hard_kw = ("architect", "design system", "reverse engineer",
+                   "analyze complex", "redesign", "方案设计", "架构")
+        code_kw = ("implement", "write code", "fix bug", "debug", "test",
+                   "pr ", "pull request", "github", "代码", "重构", "修复")
+        cn_kw = ("中文", "翻译", "总结", "报告", "文档", "调研",
+                 "搜索", "写作", "摘要")
+        
+        if any(kw in prompt_lower for kw in hard_kw):
+            category = "架构"
+        elif any(kw in prompt_lower for kw in code_kw):
+            category = "代码"
+        elif any(kw in prompt_lower for kw in cn_kw):
+            category = "中文"
+        else:
+            category = "通用"
+        
         entry: dict[str, Any] = {
             "id": s.step_num,
             "title": title,
             "deps": deps,
             "status": s.status.value if hasattr(s.status, "value") else str(s.status),
+            "category": category,
         }
         if s.task_id:
             entry["tid"] = s.task_id
@@ -106,9 +126,26 @@ body {{
     display: -webkit-box; -webkit-line-clamp: 3;
     -webkit-box-orient: vertical; overflow: hidden;
 }}
-.node-meta {{ display: flex; align-items: center; gap: 6px; margin-top: 2px; }}
+.node-meta {{ display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap; }}
 .node-tid {{ font-size: 9px; color: #999; font-family: monospace; }}
 .node-duration {{ font-size: 9px; color: #2196F3; font-weight: 600; }}
+.node-timeout {{ font-size: 9px; color: #FF9800; font-family: monospace; }}
+.node-category {{ 
+    font-size: 9px; 
+    color: white; 
+    background: #9C27B0; 
+    padding: 1px 5px; 
+    border-radius: 3px; 
+    font-weight: 600; 
+}}
+.node-model {{ 
+    font-size: 8px; 
+    color: #666; 
+    font-family: monospace; 
+    background: #f5f5f5; 
+    padding: 1px 4px; 
+    border-radius: 2px; 
+}}
 .node-status-icon {{ font-size: 14px; flex-shrink: 0; }}
 .node.pending {{ border-left-color: #e0e0e0; }}
 .node.pending .node-icon {{ background: #e0e0e0; }}
@@ -199,10 +236,12 @@ steps.forEach(s => {{
     const dur = (s.status === 'running' && s.duration)
         ? `<span class="node-duration">\\u23f1${{s.duration}}</span>` : '';
     const timeout = s.timeout
-        ? `<span class="node-tid">\\u23f0${{s.timeout}}m</span>` : '';
+        ? `<span class="node-timeout">\\u23f0${{s.timeout}}m</span>` : '';
+    const category = s.category
+        ? `<span class="node-category">${{s.category}}</span>` : '';
     const model = s.model
-        ? `<span class="node-tid">\\U0001f916${{s.model}}</span>` : '';
-    const metaParts = [tid, dur, timeout, model].filter(Boolean);
+        ? `<span class="node-model">\\U0001f916${{s.model.split('/').pop()}}</span>` : '';
+    const metaParts = [tid, dur, timeout, category, model].filter(Boolean);
     const meta = metaParts.length
         ? `<div class="node-meta">${{metaParts.join(' ')}}</div>` : '';
     el.innerHTML = `
