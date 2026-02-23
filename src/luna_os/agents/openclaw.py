@@ -103,10 +103,10 @@ class OpenClawRunner(AgentRunner):
             "streaming-bridge",
             session_label,
             chat_id,
-            "--timeout", "1800",
         ]
         if task_id:
             cmd.extend(["--task-id", task_id])
+        cmd.extend(["--timeout", "1800"])
 
         try:
             log_fh = open("/tmp/streaming-bridge.log", "a")  # noqa: SIM115
