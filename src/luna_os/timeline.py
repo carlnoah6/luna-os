@@ -11,11 +11,16 @@ import os
 import tempfile
 from typing import Any
 
-from luna_os.types import Plan
+from luna_os.types import Plan, Step
 
 
-def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
-    """Convert a plan's steps into the data format needed for the timeline graph."""
+def steps_to_graph_data(plan: Plan, estimate_model_fn=None) -> list[dict[str, Any]]:
+    """Convert a plan's steps into the data format needed for the timeline graph.
+    
+    Args:
+        plan: The plan to convert
+        estimate_model_fn: Optional function to estimate model for a step (Step -> str)
+    """
     steps_data: list[dict[str, Any]] = []
     for s in plan.steps:
         # Filter out self-referencing dependencies
@@ -52,8 +57,14 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
             entry["tid"] = s.task_id
         if s.timeout_minutes:
             entry["timeout"] = s.timeout_minutes
-        if s.model:
-            entry["model"] = s.model
+        
+        # Use explicit model or estimate it
+        model = s.model
+        if not model and estimate_model_fn:
+            model = estimate_model_fn(s)
+        if model:
+            entry["model"] = model
+            
         steps_data.append(entry)
     return steps_data
 

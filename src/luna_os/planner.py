@@ -439,7 +439,7 @@ class Planner:
             import shutil
             import tempfile
 
-            steps_data = steps_to_graph_data(plan)
+            steps_data = steps_to_graph_data(plan, estimate_model_fn=self._estimate_model)
             if not steps_data:
                 return
             status_icon = {
