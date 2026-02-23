@@ -60,8 +60,10 @@ class OpenClawRunner(AgentRunner):
             "lane": "subagent",
             "timeout": timeout_sec,
         }
-        if model:
-            params["model"] = model
+        # Note: Gateway agent RPC does not support 'model' parameter yet
+        # Model override must be done via session-level config or /model command
+        # if model:
+        #     params["model"] = model
 
         cmd = [
             self._binary, "gateway", "call", "agent",
