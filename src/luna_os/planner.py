@@ -564,25 +564,30 @@ class Planner:
         """Estimate the best model for a step based on its prompt.
 
         Returns the step's explicit model if set, otherwise infers
-        from prompt keywords. Returns None to use the default model.
+        from prompt keywords.  Cost tiers (Aiberm pricing):
+          - gpt-5-nano:  $0.014/$0.112  (cheapest)
+          - gpt-5-mini:  $0.068/$0.544
+          - kimi-k2.5:   Moonshot direct (cheap, strong Chinese)
+          - claude-sonnet-4-6-thinking: $0.562/$2.810
+          - claude-opus-4-6-thinking:   $0.937/$4.683
         """
         if step.model:
             return step.model
 
         prompt = (step.prompt or step.title or "").lower()
 
-        # Code-heavy tasks → Claude (best code quality)
-        code_kw = ("refactor", "implement", "write code", "fix bug",
-                   "debug", "test", "pr ", "pull request", "github",
-                   "代码", "重构", "修复")
-        if any(kw in prompt for kw in code_kw):
-            return "claude-sonnet-4-5"
-
-        # Complex reasoning → Claude Opus
+        # Complex reasoning → Claude Opus (expensive, use sparingly)
         hard_kw = ("architect", "design system", "reverse engineer",
                    "analyze complex", "redesign", "方案设计", "架构")
         if any(kw in prompt for kw in hard_kw):
             return "claude-opus-4-6-thinking"
+
+        # Code-heavy tasks → Claude Sonnet (good code, moderate cost)
+        code_kw = ("refactor", "implement", "write code", "fix bug",
+                   "debug", "pr ", "pull request", "github",
+                   "代码", "重构", "修复")
+        if any(kw in prompt for kw in code_kw):
+            return "claude-sonnet-4-6-thinking"
 
         # Chinese content tasks → Kimi (strong Chinese, cheap)
         cn_kw = ("中文", "翻译", "总结", "报告", "文档", "调研",
@@ -590,8 +595,15 @@ class Planner:
         if any(kw in prompt for kw in cn_kw):
             return "kimi-k2.5"
 
-        # Default: let the gateway decide
-        return None
+        # Light tasks → gpt-5-nano (cheapest)
+        light_kw = ("compute", "calculate", "format", "convert",
+                    "extract", "parse", "count", "list", "sort",
+                    "计算", "格式", "提取")
+        if any(kw in prompt for kw in light_kw):
+            return "gpt-5-nano"
+
+        # Default: gpt-5-mini (cheap, capable enough for most tasks)
+        return "gpt-5-mini"
 
     def _build_spawn_prompt(self, plan: Plan, step: Step, task_chat_id: str = "") -> str:
         """Build the prompt for spawning a subagent for a step."""
