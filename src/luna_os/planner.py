@@ -566,38 +566,40 @@ class Planner:
         Returns the step's explicit model if set, otherwise infers
         from prompt keywords.  All models go through API Proxy.
 
-        Available models (Gateway config):
-          - api-proxy/kimi-k2.5          (cheap, strong Chinese)
-          - api-proxy/minimax-m2.5       (cheap, general purpose)
-          - api-proxy-claude/claude-opus-4-6-thinking (expensive, best reasoning)
+        Model tiers (2026-02-23):
+          T4 - api-proxy-claude/claude-opus-4-6-thinking  (final resolver)
+          T3 - api-proxy-claude/claude-sonnet-4-6         (code, complex tasks)
+          T2 - api-proxy/gemini-3-flash-preview           (default, cheap)
+               api-proxy-claude/claude-haiku-4-5-20251001 (cheap, capable)
+          CN - api-proxy/kimi-k2.5                        (Chinese tasks)
         """
         if step.model:
             return step.model
 
         prompt = (step.prompt or step.title or "").lower()
 
-        # Complex reasoning / architecture → Claude Opus
+        # Complex reasoning / architecture → T4 Claude Opus
         hard_kw = ("architect", "design system", "reverse engineer",
                    "analyze complex", "redesign", "方案设计", "架构",
                    "refactor", "rewrite", "migrate")
         if any(kw in prompt for kw in hard_kw):
             return "api-proxy-claude/claude-opus-4-6-thinking"
 
-        # Code tasks → Claude Opus (best code quality available)
+        # Code tasks → T3 Claude Sonnet
         code_kw = ("implement", "write code", "fix bug",
                    "debug", "test", "pr ", "pull request", "github",
                    "代码", "重构", "修复")
         if any(kw in prompt for kw in code_kw):
-            return "api-proxy-claude/claude-opus-4-6-thinking"
+            return "api-proxy-claude/claude-sonnet-4-6"
 
-        # Chinese content → Kimi (strong Chinese, cheap)
+        # Chinese content → Kimi (strong Chinese)
         cn_kw = ("中文", "翻译", "总结", "报告", "文档", "调研",
                  "搜索", "写作", "摘要")
         if any(kw in prompt for kw in cn_kw):
             return "api-proxy/kimi-k2.5"
 
-        # Default: kimi (cheapest available)
-        return "api-proxy/kimi-k2.5"
+        # Default: T2 gemini-3-flash (cheapest capable)
+        return "api-proxy/gemini-3-flash-preview"
 
     def _build_spawn_prompt(self, plan: Plan, step: Step, task_chat_id: str = "") -> str:
         """Build the prompt for spawning a subagent for a step."""
@@ -627,6 +629,36 @@ class Planner:
                 plan_lines.append(f"  {marker} [{st}] {s.step_num}. {s.title}{deps}")
         plan_overview = "\n".join(plan_lines)
 
+        # Detect code tasks and add coding-agent instructions
+        prompt_lower = prompt_text.lower()
+        code_kw = ("implement", "write code", "fix bug", "debug", "test",
+                   "pr ", "pull request", "github", "代码", "重构", "修复")
+        is_code_task = any(kw in prompt_lower for kw in code_kw)
+
+        coding_section = ""
+        if is_code_task:
+            coding_section = """
+## Coding Tasks - Use Claude Code / Codex
+
+For code implementation, bug fixes, and testing:
+1. Use the coding-agent skill to delegate to Claude Code or Codex
+2. These tools have subscription access (no token cost)
+3. Your role is to:
+   - Set up the task context and requirements
+   - Call coding-agent skill with clear instructions
+   - Review the generated code
+   - Verify tests pass
+   - Report results
+
+Example:
+```bash
+# Use coding-agent skill for actual code work
+coding-agent --task "implement feature X" --repo /path/to/repo
+```
+
+Do NOT write code yourself - delegate to coding-agent skill.
+"""
+
         task_chat_section = ""
         if task_chat_id:
             task_chat_section = f"""
@@ -649,7 +681,7 @@ If another step is running in parallel, trust that it will handle its own scope.
 ## Current Step
 **Step {step_num}: {step.title or ""}**
 {prompt_text}
-
+{coding_section}
 ## Task ID
 {task_id}
 
