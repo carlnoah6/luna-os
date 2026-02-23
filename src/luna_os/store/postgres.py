@@ -662,3 +662,133 @@ class PostgresBackend(StorageBackend):
                WHERE id = ANY(%s)""",
             (now_utc(), event_ids),
         )
+
+    # -------------------------------------------------------------------------
+    # Plan Execution Logs
+    # -------------------------------------------------------------------------
+
+    def log_plan_event(
+        self,
+        plan_id: str,
+        event_type: str,
+        step_num: int | None = None,
+        task_id: str | None = None,
+        event_data: dict[str, Any] | None = None,
+        session_snapshot: str | None = None,
+    ) -> None:
+        """Log a plan execution event.
+        
+        Args:
+            plan_id: Plan ID
+            event_type: Event type (plan_created, step_started, step_completed, etc.)
+            step_num: Step number (optional)
+            task_id: Task ID (optional)
+            event_data: Additional event data (optional)
+            session_snapshot: Compressed session file content (optional)
+        """
+        self._execute(
+            """INSERT INTO plan_execution_logs
+               (plan_id, step_num, task_id, event_type, event_data, session_snapshot)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (
+                plan_id,
+                step_num,
+                task_id,
+                event_type,
+                json.dumps(event_data) if event_data else None,
+                session_snapshot,
+            ),
+        )
+
+    def get_plan_logs(
+        self,
+        plan_id: str,
+        event_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Get execution logs for a plan.
+        
+        Args:
+            plan_id: Plan ID
+            event_type: Filter by event type (optional)
+            limit: Maximum number of logs to return
+            
+        Returns:
+            List of log entries
+        """
+        if event_type:
+            rows = self._execute(
+                """SELECT * FROM plan_execution_logs
+                   WHERE plan_id = %s AND event_type = %s
+                   ORDER BY timestamp DESC
+                   LIMIT %s""",
+                (plan_id, event_type, limit),
+                fetch="all",
+            )
+        else:
+            rows = self._execute(
+                """SELECT * FROM plan_execution_logs
+                   WHERE plan_id = %s
+                   ORDER BY timestamp DESC
+                   LIMIT %s""",
+                (plan_id, limit),
+                fetch="all",
+            )
+        
+        result = []
+        for r in rows or []:
+            log = dict(r)
+            if log.get('event_data'):
+                log['event_data'] = json.loads(log['event_data']) if isinstance(log['event_data'], str) else log['event_data']
+            result.append(log)
+        return result
+
+    def get_plan_stats(
+        self,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Get statistics about plan executions.
+        
+        Args:
+            start_date: Start date (optional)
+            end_date: End date (optional)
+            
+        Returns:
+            Statistics dictionary
+        """
+        where_clauses = []
+        params = []
+        
+        if start_date:
+            where_clauses.append("created_at >= %s")
+            params.append(start_date)
+        if end_date:
+            where_clauses.append("created_at <= %s")
+            params.append(end_date)
+        
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        
+        # Get plan counts by status
+        status_counts = self._execute(
+            f"""SELECT status, COUNT(*) as count
+                FROM plans
+                {where_sql}
+                GROUP BY status""",
+            tuple(params),
+            fetch="all",
+        )
+        
+        # Get average completion time
+        avg_time = self._execute(
+            f"""SELECT AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/60) as avg_minutes
+                FROM plans
+                {where_sql} {'AND' if where_sql else 'WHERE'} completed_at IS NOT NULL""",
+            tuple(params),
+            fetch="one",
+        )
+        
+        return {
+            'status_counts': {r['status']: r['count'] for r in (status_counts or [])},
+            'avg_completion_minutes': avg_time['avg_minutes'] if avg_time else None,
+        }

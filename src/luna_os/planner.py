@@ -810,6 +810,20 @@ Report results to: {chat_id}
                         if session_key:
                             self.store.update_task(task_id, session_key=session_key)
                         spawn_ok = True
+                        
+                        # Log step start
+                        self.store.log_plan_event(
+                            plan_id=plan.id,
+                            step_num=step.step_num,
+                            task_id=task_id,
+                            event_type="step_started",
+                            event_data={
+                                "title": step.title,
+                                "model": step_model,
+                                "timeout_minutes": timeout_min,
+                                "session_key": session_key,
+                            }
+                        )
                     except Exception as exc:
                         logger.warning("Spawn failed for step %d: %s", step.step_num, exc)
 
@@ -822,6 +836,19 @@ Report results to: {chat_id}
                     fail_msg = "Spawn failed: agent process could not be started"
                 self.store.fail_step(plan.id, step.step_num, fail_msg)
                 self.store.fail_task(task_id, fail_msg)
+                
+                # Log step failure
+                self.store.log_plan_event(
+                    plan_id=plan.id,
+                    step_num=step.step_num,
+                    task_id=task_id,
+                    event_type="step_failed",
+                    event_data={
+                        "title": step.title,
+                        "error": fail_msg,
+                    }
+                )
+                
                 logger.warning(
                     "Rolled back step %d (task %s) to failed after spawn failure",
                     step.step_num,
@@ -874,6 +901,17 @@ Report results to: {chat_id}
         plan_id = self.store.next_plan_id()
         plan = self.store.create_plan(plan_id, chat_id, goal, steps)
         self.store.update_plan_status(plan_id, "draft")
+        
+        # Log plan creation
+        self.store.log_plan_event(
+            plan_id=plan_id,
+            event_type="plan_created",
+            event_data={
+                "chat_id": chat_id,
+                "goal": goal,
+                "step_count": len(steps),
+            }
+        )
 
         # Send interactive confirm card (with fallback to text)
         card = self.build_confirm_card(plan)
@@ -901,6 +939,14 @@ Report results to: {chat_id}
             raise KeyError(f"No draft plan found for {chat_id}")
 
         self.store.update_plan_status(plan.id, "active")
+        
+        # Log plan start
+        self.store.log_plan_event(
+            plan_id=plan.id,
+            event_type="plan_started",
+            event_data={"chat_id": chat_id}
+        )
+        
         ready = self.store.ready_steps(plan.id)
         results: list[tuple[int, bool]] = []
         if ready:
@@ -940,6 +986,21 @@ Report results to: {chat_id}
             return {"skipped": True, "reason": "step already done", "step": step_num}
 
         self.store.complete_step(plan.id, step_num, result)
+        
+        # Log step completion
+        step = self.store.get_step(plan.id, step_num)
+        if step:
+            self.store.log_plan_event(
+                plan_id=plan.id,
+                step_num=step_num,
+                task_id=step.task_id,
+                event_type="step_completed",
+                event_data={
+                    "title": step.title,
+                    "result": result[:500],  # Truncate long results
+                    "model": step.model,
+                }
+            )
 
         # Complete associated task
         step = self.store.get_step(plan.id, step_num)
@@ -1024,6 +1085,17 @@ Report results to: {chat_id}
                             summary or "All steps done.",
                         )
                         plan_completed = True
+                        
+                        # Log plan completion
+                        self.store.log_plan_event(
+                            plan_id=plan.id,
+                            event_type="plan_completed",
+                            event_data={
+                                "goal": plan.goal,
+                                "total_steps": len(plan.steps),
+                                "summary": summary[:500] if summary else None,
+                            }
+                        )
 
         self._update_dashboard("step_done")
         if plan:
