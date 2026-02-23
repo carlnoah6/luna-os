@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from luna_os.interceptor.commands import DEFAULT_COMMANDS
-from luna_os.interceptor.embedding import CommandDef, EmbeddingEngine
+from luna_os.interceptor.embedding import EmbeddingEngine
 
 
 @pytest.fixture(scope="module")

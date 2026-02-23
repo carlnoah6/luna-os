@@ -51,9 +51,9 @@ def _serve(args: list[str]) -> None:
         format="%(asctime)s [interceptor] %(levelname)s %(message)s",
     )
 
-    from luna_os.interceptor.registry import CommandRegistry
     from luna_os.interceptor.matcher import CommandMatcher
     from luna_os.interceptor.proxy import InterceptorProxy
+    from luna_os.interceptor.registry import CommandRegistry
 
     registry = CommandRegistry()
     matcher = CommandMatcher(registry)
@@ -73,8 +73,8 @@ def _test_match(args: list[str]) -> None:
 
     text = " ".join(args)
 
-    from luna_os.interceptor.registry import CommandRegistry
     from luna_os.interceptor.matcher import CommandMatcher
+    from luna_os.interceptor.registry import CommandRegistry
 
     registry = CommandRegistry()
     matcher = CommandMatcher(registry)

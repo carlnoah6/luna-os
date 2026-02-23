@@ -10,7 +10,6 @@ Architecture:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -149,7 +148,10 @@ class InterceptorProxy:
                 return web.Response(
                     status=resp.status,
                     body=resp_body,
-                    headers={k: v for k, v in resp.headers.items() if k.lower() != "transfer-encoding"},
+                    headers={
+                        k: v for k, v in resp.headers.items()
+                        if k.lower() != "transfer-encoding"
+                    },
                 )
         except Exception:
             logger.exception("Failed to forward to %s", url)

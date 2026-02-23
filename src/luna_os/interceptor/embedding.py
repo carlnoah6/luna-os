@@ -12,9 +12,9 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
