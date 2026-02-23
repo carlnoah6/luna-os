@@ -68,7 +68,7 @@ class OpenClawRunner(AgentRunner):
             "--params", json.dumps(params),
             "--expect-final",
             "--json",
-            "--timeout", str(timeout_sec + 10000),  # slightly over agent timeout
+            "--timeout", str((timeout_sec + 10) * 1000),  # convert to ms, add 10s buffer
         ]
 
         # Start streaming bridge BEFORE launching agent
