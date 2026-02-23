@@ -22,7 +22,7 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
         deps = [d for d in (s.depends_on or []) if d != s.step_num]
         raw_title = s.title or f"Step {s.step_num}"
         title = raw_title[:50] + ("\u2026" if len(raw_title) > 50 else "")
-        
+
         # Classify task based on keywords
         prompt_lower = (s.prompt or s.title or "").lower()
         hard_kw = ("architect", "design system", "reverse engineer",
@@ -31,7 +31,7 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
                    "pr ", "pull request", "github", "代码", "重构", "修复")
         cn_kw = ("中文", "翻译", "总结", "报告", "文档", "调研",
                  "搜索", "写作", "摘要")
-        
+
         if any(kw in prompt_lower for kw in hard_kw):
             category = "架构"
         elif any(kw in prompt_lower for kw in code_kw):
@@ -40,7 +40,7 @@ def steps_to_graph_data(plan: Plan) -> list[dict[str, Any]]:
             category = "中文"
         else:
             category = "通用"
-        
+
         entry: dict[str, Any] = {
             "id": s.step_num,
             "title": title,
@@ -130,21 +130,21 @@ body {{
 .node-tid {{ font-size: 9px; color: #999; font-family: monospace; }}
 .node-duration {{ font-size: 9px; color: #2196F3; font-weight: 600; }}
 .node-timeout {{ font-size: 9px; color: #FF9800; font-family: monospace; }}
-.node-category {{ 
-    font-size: 9px; 
-    color: white; 
-    background: #9C27B0; 
-    padding: 1px 5px; 
-    border-radius: 3px; 
-    font-weight: 600; 
+.node-category {{
+    font-size: 9px;
+    color: white;
+    background: #9C27B0;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 600;
 }}
-.node-model {{ 
-    font-size: 8px; 
-    color: #666; 
-    font-family: monospace; 
-    background: #f5f5f5; 
-    padding: 1px 4px; 
-    border-radius: 2px; 
+.node-model {{
+    font-size: 8px;
+    color: #666;
+    font-family: monospace;
+    background: #f5f5f5;
+    padding: 1px 4px;
+    border-radius: 2px;
 }}
 .node-status-icon {{ font-size: 14px; flex-shrink: 0; }}
 .node.pending {{ border-left-color: #e0e0e0; }}
