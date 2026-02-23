@@ -650,22 +650,32 @@ class Planner:
 ## Coding Tasks - Use Claude Code / Codex
 
 For code implementation, bug fixes, and testing:
-1. Use the coding-agent skill to delegate to Claude Code or Codex
-2. These tools have subscription access (no token cost)
+1. **You MUST use Codex or Claude Code** (subscription access, no token cost)
+2. **Do NOT write code yourself** - always delegate to these tools
 3. Your role is to:
    - Set up the task context and requirements
-   - Call coding-agent skill with clear instructions
+   - Call Codex/Claude Code with clear instructions
    - Review the generated code
    - Verify tests pass
    - Report results
 
-Example:
+**How to call Codex** (requires git repo):
 ```bash
-# Use coding-agent skill for actual code work
-coding-agent --task "implement feature X" --repo /path/to/repo
+# Create temp repo if needed
+bash command:"cd /tmp && mkdir -p myproject && cd myproject && git init"
+
+# Run Codex with PTY (required for interactive CLI)
+bash pty:true workdir:/tmp/myproject command:"codex exec 'implement feature X'"
 ```
 
-Do NOT write code yourself - delegate to coding-agent skill.
+**How to call Claude Code** (simpler, no git required):
+```bash
+# Use -p for non-interactive output
+bash pty:true workdir:/path/to/project command:"claude -p 'implement feature X'"
+```
+
+**CRITICAL**: Always use `pty:true` when calling Codex or Claude Code.
+Without PTY, the agent will hang or produce broken output.
 """
 
         task_chat_section = ""
