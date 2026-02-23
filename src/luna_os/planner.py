@@ -66,7 +66,7 @@ def _short_desc(text: str, max_len: int = 60) -> str:
 
 
 def normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
-    """Normalize step input to ``{title, prompt, depends_on}`` format."""
+    """Normalize step input to ``{title, prompt, depends_on, timeout_minutes, model}`` format."""
     title = (
         raw.get("title")
         or raw.get("description")
@@ -80,7 +80,16 @@ def normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
         depends_on = []
     if isinstance(depends_on, int):
         depends_on = [depends_on]
-    return {"title": title, "prompt": prompt, "depends_on": depends_on}
+    
+    result = {"title": title, "prompt": prompt, "depends_on": depends_on}
+    
+    # Preserve optional fields
+    if "timeout_minutes" in raw:
+        result["timeout_minutes"] = raw["timeout_minutes"]
+    if "model" in raw:
+        result["model"] = raw["model"]
+    
+    return result
 
 
 def resolve_title_deps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:

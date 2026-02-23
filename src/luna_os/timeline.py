@@ -132,8 +132,9 @@ body {{
 .node-timeout {{ font-size: 9px; color: #FF9800; font-family: monospace; }}
 .node-category {{
     font-size: 10px;
-    color: white;
-    background: #9C27B0;
+    color: #666;
+    background: #E8EAF6;
+    border: 1px solid #C5CAE9;
     padding: 2px 6px;
     border-radius: 4px;
     font-weight: 600;
