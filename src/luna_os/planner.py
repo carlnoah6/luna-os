@@ -564,46 +564,40 @@ class Planner:
         """Estimate the best model for a step based on its prompt.
 
         Returns the step's explicit model if set, otherwise infers
-        from prompt keywords.  Cost tiers (Aiberm pricing):
-          - gpt-5-nano:  $0.014/$0.112  (cheapest)
-          - gpt-5-mini:  $0.068/$0.544
-          - kimi-k2.5:   Moonshot direct (cheap, strong Chinese)
-          - claude-sonnet-4-6-thinking: $0.562/$2.810
-          - claude-opus-4-6-thinking:   $0.937/$4.683
+        from prompt keywords.  All models go through API Proxy.
+
+        Available models (Gateway config):
+          - api-proxy/kimi-k2.5          (cheap, strong Chinese)
+          - api-proxy/minimax-m2.5       (cheap, general purpose)
+          - api-proxy-claude/claude-opus-4-6-thinking (expensive, best reasoning)
         """
         if step.model:
             return step.model
 
         prompt = (step.prompt or step.title or "").lower()
 
-        # Complex reasoning → Claude Opus (expensive, use sparingly)
+        # Complex reasoning / architecture → Claude Opus
         hard_kw = ("architect", "design system", "reverse engineer",
-                   "analyze complex", "redesign", "方案设计", "架构")
+                   "analyze complex", "redesign", "方案设计", "架构",
+                   "refactor", "rewrite", "migrate")
         if any(kw in prompt for kw in hard_kw):
-            return "claude-opus-4-6-thinking"
+            return "api-proxy-claude/claude-opus-4-6-thinking"
 
-        # Code-heavy tasks → Claude Sonnet (good code, moderate cost)
-        code_kw = ("refactor", "implement", "write code", "fix bug",
-                   "debug", "pr ", "pull request", "github",
+        # Code tasks → Claude Opus (best code quality available)
+        code_kw = ("implement", "write code", "fix bug",
+                   "debug", "test", "pr ", "pull request", "github",
                    "代码", "重构", "修复")
         if any(kw in prompt for kw in code_kw):
-            return "claude-sonnet-4-6-thinking"
+            return "api-proxy-claude/claude-opus-4-6-thinking"
 
-        # Chinese content tasks → Kimi (strong Chinese, cheap)
+        # Chinese content → Kimi (strong Chinese, cheap)
         cn_kw = ("中文", "翻译", "总结", "报告", "文档", "调研",
                  "搜索", "写作", "摘要")
         if any(kw in prompt for kw in cn_kw):
-            return "kimi-k2.5"
+            return "api-proxy/kimi-k2.5"
 
-        # Light tasks → gpt-5-nano (cheapest)
-        light_kw = ("compute", "calculate", "format", "convert",
-                    "extract", "parse", "count", "list", "sort",
-                    "计算", "格式", "提取")
-        if any(kw in prompt for kw in light_kw):
-            return "gpt-5-nano"
-
-        # Default: gpt-5-mini (cheap, capable enough for most tasks)
-        return "gpt-5-mini"
+        # Default: kimi (cheapest available)
+        return "api-proxy/kimi-k2.5"
 
     def _build_spawn_prompt(self, plan: Plan, step: Step, task_chat_id: str = "") -> str:
         """Build the prompt for spawning a subagent for a step."""
