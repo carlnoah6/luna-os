@@ -11,7 +11,7 @@ import os
 import tempfile
 from typing import Any
 
-from luna_os.types import Plan, Step
+from luna_os.types import Plan
 
 
 def steps_to_graph_data(plan: Plan, estimate_model_fn=None) -> list[dict[str, Any]]:
@@ -57,14 +57,14 @@ def steps_to_graph_data(plan: Plan, estimate_model_fn=None) -> list[dict[str, An
             entry["tid"] = s.task_id
         if s.timeout_minutes:
             entry["timeout"] = s.timeout_minutes
-        
+
         # Use explicit model or estimate it
         model = s.model
         if not model and estimate_model_fn:
             model = estimate_model_fn(s)
         if model:
             entry["model"] = model
-            
+
         steps_data.append(entry)
     return steps_data
 

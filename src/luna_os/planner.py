@@ -80,15 +80,15 @@ def normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
         depends_on = []
     if isinstance(depends_on, int):
         depends_on = [depends_on]
-    
+
     result = {"title": title, "prompt": prompt, "depends_on": depends_on}
-    
+
     # Preserve optional fields
     if "timeout_minutes" in raw:
         result["timeout_minutes"] = raw["timeout_minutes"]
     if "model" in raw:
         result["model"] = raw["model"]
-    
+
     return result
 
 
