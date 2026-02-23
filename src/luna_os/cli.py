@@ -370,7 +370,7 @@ def main() -> None:
     elif top == "streaming-bridge":
         from luna_os.streaming_bridge import main as bridge_main
 
-        bridge_main()
+        bridge_main(rest)
     elif top == "session-overview":
         from luna_os.session_overview import main as overview_main
 
