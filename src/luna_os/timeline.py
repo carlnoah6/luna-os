@@ -131,20 +131,20 @@ body {{
 .node-duration {{ font-size: 9px; color: #2196F3; font-weight: 600; }}
 .node-timeout {{ font-size: 9px; color: #FF9800; font-family: monospace; }}
 .node-category {{
-    font-size: 9px;
+    font-size: 10px;
     color: white;
     background: #9C27B0;
-    padding: 1px 5px;
-    border-radius: 3px;
+    padding: 2px 6px;
+    border-radius: 4px;
     font-weight: 600;
 }}
 .node-model {{
-    font-size: 8px;
+    font-size: 9px;
     color: #666;
     font-family: monospace;
     background: #f5f5f5;
-    padding: 1px 4px;
-    border-radius: 2px;
+    padding: 2px 5px;
+    border-radius: 3px;
 }}
 .node-status-icon {{ font-size: 14px; flex-shrink: 0; }}
 .node.pending {{ border-left-color: #e0e0e0; }}
@@ -240,7 +240,7 @@ steps.forEach(s => {{
     const category = s.category
         ? `<span class="node-category">${{s.category}}</span>` : '';
     const model = s.model
-        ? `<span class="node-model">\\U0001f916${{s.model.split('/').pop()}}</span>` : '';
+        ? `<span class="node-model">${{s.model.split('/').pop()}}</span>` : '';
     const metaParts = [tid, dur, timeout, category, model].filter(Boolean);
     const meta = metaParts.length
         ? `<div class="node-meta">${{metaParts.join(' ')}}</div>` : '';
@@ -354,9 +354,16 @@ if (phased.length > 0) {{
     let cumY = phasedStartY;
     for (let r = 0; r < numRows; r++) {{
         rowY[r] = cumY;
-        const directKey = r + '-' + (r + 1);
-        const directArrows = crossRowArrows[directKey] || 0;
-        const rowGap = baseRowGap + directArrows * arrowLineSpacing;
+        // Count all arrows that cross this gap (including multi-row jumps)
+        let gapArrows = 0;
+        for (const [key, count] of Object.entries(crossRowArrows)) {{
+            const [from, to] = key.split('-').map(Number);
+            // If this gap (r to r+1) is between from and to, count it
+            if (from <= r && r < to) {{
+                gapArrows += count;
+            }}
+        }}
+        const rowGap = baseRowGap + gapArrows * arrowLineSpacing;
         cumY += rowMaxH[r] + rowGap;
     }}
     totalH = Math.max(totalH, cumY);
