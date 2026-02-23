@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from luna_os.interceptor.registry import CommandRegistry
 from luna_os.interceptor.matcher import CommandMatcher
+from luna_os.interceptor.registry import CommandRegistry
 from luna_os.interceptor.types import MatchResult
 
 
