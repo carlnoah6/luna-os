@@ -559,6 +559,40 @@ class Planner:
         # Light tasks: compute, calculate, query, summarize, report
         return 5
 
+    @staticmethod
+    def _estimate_model(step: Step) -> str | None:
+        """Estimate the best model for a step based on its prompt.
+
+        Returns the step's explicit model if set, otherwise infers
+        from prompt keywords. Returns None to use the default model.
+        """
+        if step.model:
+            return step.model
+
+        prompt = (step.prompt or step.title or "").lower()
+
+        # Code-heavy tasks → Claude (best code quality)
+        code_kw = ("refactor", "implement", "write code", "fix bug",
+                   "debug", "test", "pr ", "pull request", "github",
+                   "代码", "重构", "修复")
+        if any(kw in prompt for kw in code_kw):
+            return "claude-sonnet-4-5"
+
+        # Complex reasoning → Claude Opus
+        hard_kw = ("architect", "design system", "reverse engineer",
+                   "analyze complex", "redesign", "方案设计", "架构")
+        if any(kw in prompt for kw in hard_kw):
+            return "claude-opus-4-6-thinking"
+
+        # Chinese content tasks → Kimi (strong Chinese, cheap)
+        cn_kw = ("中文", "翻译", "总结", "报告", "文档", "调研",
+                 "搜索", "写作", "摘要")
+        if any(kw in prompt for kw in cn_kw):
+            return "kimi-k2.5"
+
+        # Default: let the gateway decide
+        return None
+
     def _build_spawn_prompt(self, plan: Plan, step: Step, task_chat_id: str = "") -> str:
         """Build the prompt for spawning a subagent for a step."""
         prompt_text = step.prompt or step.title or ""
@@ -705,7 +739,7 @@ Report results to: {chat_id}
                 if plan_fresh and updated_step:
                     prompt = self._build_spawn_prompt(plan_fresh, updated_step, task_chat_id)
                     timeout_min = self._estimate_timeout(updated_step)
-                    step_model = updated_step.model
+                    step_model = self._estimate_model(updated_step)
                     try:
                         session_label = f"task-{task_chat_id[-8:]}" if task_chat_id else ""
                         session_key = self.agent_runner.spawn(
