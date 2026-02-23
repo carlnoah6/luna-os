@@ -264,10 +264,12 @@ class PostgresBackend(StorageBackend):
         output_tokens: int = 0,
         cost_usd: float = 0,
     ) -> None:
+        # Fix: Use direct assignment instead of += to avoid duplicate accumulation
+        # when _extract_session_cost() is called multiple times (e.g., retries)
         self._execute(
-            """UPDATE tasks SET input_tokens = input_tokens + %s,
-                   output_tokens = output_tokens + %s,
-                   cost_usd = cost_usd + %s,
+            """UPDATE tasks SET input_tokens = %s,
+                   output_tokens = %s,
+                   cost_usd = %s,
                    updated_at = %s WHERE id = %s""",
             (input_tokens, output_tokens, cost_usd, now_utc(), task_id),
         )
