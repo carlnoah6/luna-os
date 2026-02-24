@@ -47,7 +47,7 @@ def _serve(args: list[str]) -> None:
     opts = parser.parse_args(args)
 
     logging.basicConfig(
-        level=getattr(logging, opts.log_level.upper(), logging.INFO),
+        level=logging.DEBUG,
         format="%(asctime)s [interceptor] %(levelname)s %(message)s",
     )
 

@@ -84,9 +84,15 @@ class InterceptorProxy:
         t0 = time.monotonic()
         body = await request.read()
 
+        # Debug: log request body
+        logger.debug("Request body: %s", body.decode()[:500])
+
         # Parse the Feishu event to extract user text
         user_text = self._extract_text(body)
+        logger.debug("Extracted text: %r", user_text)
+        
         if not user_text:
+            logger.debug("No text extracted, forwarding to upstream")
             return await self._forward(request, body)
 
         # Run matcher
