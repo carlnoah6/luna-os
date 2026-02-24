@@ -6,7 +6,6 @@ and returns a Feishu card response dict (or text dict).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import subprocess
@@ -21,7 +20,6 @@ PREFIX = "[拦截器]"
 
 
 def _make_card(title: str, content: str, template: str = "blue") -> dict[str, Any]:
-    """Helper to create a Feishu card response."""
     return {
         "msg_type": "interactive",
         "card": {
@@ -41,16 +39,32 @@ def _make_error_card(error_msg: str) -> dict[str, Any]:
 
 
 def _run_cmd(*args: str, timeout: int = 10) -> tuple[int, str, str]:
-    """Run a command and return (returncode, stdout, stderr)."""
     try:
-        proc = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout,
-        )
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
         return proc.returncode, proc.stdout, proc.stderr
     except subprocess.TimeoutExpired:
         return 1, "", "Command timed out"
     except Exception as e:
         return 1, "", str(e)
+
+
+def _get_sessions(active_minutes: int = 5) -> list[dict[str, Any]]:
+    """Get active sessions from OpenClaw."""
+    rc, stdout, stderr = _run_cmd(
+        "openclaw", "sessions", "--active", str(active_minutes), "--json",
+    )
+    if rc != 0 or not stdout.strip():
+        return []
+    try:
+        data = json.loads(stdout)
+        # openclaw sessions --json returns {sessions: [...]}
+        if isinstance(data, dict):
+            return data.get("sessions", [])
+        if isinstance(data, list):
+            return data
+        return []
+    except (json.JSONDecodeError, TypeError):
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +74,7 @@ def _run_cmd(*args: str, timeout: int = 10) -> tuple[int, str, str]:
 async def handle_dashboard(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show the task/plan dashboard."""
     try:
+        # Task status
         rc, stdout, stderr = _run_cmd("luna-os", "task", "status")
         if rc != 0:
             return _make_error_card(f"task status failed: {stderr}")
@@ -68,13 +83,33 @@ async def handle_dashboard(user_text: str, result: InterceptResult) -> dict[str,
         total = status.get("total", 0)
         counts = status.get("counts", {})
 
-        content = f"""**任务统计**
+        # Active plans
+        rc2, plan_out, _ = _run_cmd("luna-os", "plan", "list", "--status", "active")
+        active_plans = []
+        if rc2 == 0 and plan_out.strip():
+            for line in plan_out.strip().split("\n"):
+                line = line.strip()
+                if line and "[active]" in line:
+                    active_plans.append(line)
 
+        # Active sessions
+        sessions = _get_sessions(5)
+
+        content = f"""**任务统计**
 - 总任务数：{total}
 - 运行中：{counts.get('running', 0)}
 - 排队中：{counts.get('queued', 0)}
 - 已完成：{counts.get('done', 0)}
-- 失败：{counts.get('failed', 0)}"""
+- 失败：{counts.get('failed', 0)}
+
+**活跃计划** ({len(active_plans)} 个)"""
+
+        for p in active_plans[:5]:
+            content += f"\n- {p}"
+        if len(active_plans) > 5:
+            content += f"\n- ... 还有 {len(active_plans) - 5} 个"
+
+        content += f"\n\n**活跃 Session**: {len(sessions)} 个"
 
         return _make_card("📊 仪表盘", content)
     except Exception as e:
@@ -113,17 +148,12 @@ async def handle_tasks(user_text: str, result: InterceptResult) -> dict[str, Any
 async def handle_model(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show current model info."""
     try:
-        rc, stdout, stderr = _run_cmd(
-            "openclaw", "sessions", "--active", "5", "--json",
-        )
-        if rc != 0:
-            return _make_error_card(f"sessions failed: {stderr}")
-
-        sessions = json.loads(stdout) if stdout.strip() else []
-        if sessions:
-            model = sessions[0].get("model", "unknown")
-        else:
-            model = "unknown"
+        sessions = _get_sessions(10)
+        model = "unknown"
+        for s in sessions:
+            if isinstance(s, dict) and s.get("model"):
+                model = s["model"]
+                break
 
         content = f"""**当前模型**: `{model}`
 
@@ -137,10 +167,9 @@ async def handle_model(user_text: str, result: InterceptResult) -> dict[str, Any
 
 
 async def handle_new(user_text: str, result: InterceptResult) -> dict[str, Any]:
-    """Start a new session — forward to OpenClaw."""
     return _make_card(
         "🔄 新对话",
-        "新对话请求已收到。\n\n⚠️ 此命令需要 OpenClaw 处理，消息已转发。",
+        "新对话请求已收到，消息已转发给 OpenClaw 处理。",
         template="orange",
     )
 
@@ -152,20 +181,22 @@ async def handle_plan(user_text: str, result: InterceptResult) -> dict[str, Any]
         if rc != 0:
             return _make_error_card(f"plan list failed: {stderr}")
 
-        plans = json.loads(stdout) if stdout.strip() else []
-        if not plans:
+        if not stdout.strip():
             return _make_card("📐 计划状态", "当前没有活跃的计划。", template="green")
 
+        # Parse text output
         lines = []
-        for p in plans[:5]:
-            pid = p.get("id", "?")
-            goal = (p.get("goal") or "")[:60]
-            total = p.get("total_steps", 0)
-            done = p.get("done_steps", 0)
-            lines.append(f"📐 `{pid}` {goal}")
-            lines.append(f"   进度：{done}/{total} 步")
+        for line in stdout.strip().split("\n"):
+            line = line.strip()
+            if line and "[active]" in line:
+                lines.append(f"🔄 {line}")
+            elif line and "[paused]" in line:
+                lines.append(f"⏸️ {line}")
 
-        return _make_card("📐 计划状态", "\n".join(lines))
+        if not lines:
+            return _make_card("📐 计划状态", "当前没有活跃的计划。", template="green")
+
+        return _make_card("📐 计划状态", "\n".join(lines[:10]))
     except Exception as e:
         logger.exception("Plan handler failed")
         return _make_error_card(str(e))
@@ -174,27 +205,32 @@ async def handle_plan(user_text: str, result: InterceptResult) -> dict[str, Any]
 async def handle_usage(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show token usage / cost."""
     try:
-        rc, stdout, stderr = _run_cmd(
-            "openclaw", "sessions", "--active", "60", "--json",
-        )
-        if rc != 0:
-            return _make_error_card(f"sessions failed: {stderr}")
-
-        sessions = json.loads(stdout) if stdout.strip() else []
+        sessions = _get_sessions(60)
         total_in = 0
         total_out = 0
+        count = 0
         for s in sessions:
-            total_in += s.get("tokensIn", 0)
-            total_out += s.get("tokensOut", 0)
+            if not isinstance(s, dict):
+                continue
+            total_in += s.get("inputTokens", 0) or 0
+            total_out += s.get("outputTokens", 0) or 0
+            count += 1
+
+        def fmt_tokens(n: int) -> str:
+            if n >= 1_000_000:
+                return f"{n / 1_000_000:.1f}M"
+            if n >= 1_000:
+                return f"{n / 1_000:.1f}k"
+            return str(n)
 
         content = f"""**最近 1 小时用量**
 
-- 活跃 session 数：{len(sessions)}
-- 输入 tokens：{total_in:,}
-- 输出 tokens：{total_out:,}
-- 总计：{total_in + total_out:,}"""
+- 活跃 Session：{count} 个
+- 输入 Token：{fmt_tokens(total_in)}
+- 输出 Token：{fmt_tokens(total_out)}
+- 总计：{fmt_tokens(total_in + total_out)}"""
 
-        return _make_card("💰 用量统计", content)
+        return _make_card("💰 用量", content)
     except Exception as e:
         logger.exception("Usage handler failed")
         return _make_error_card(str(e))
@@ -202,22 +238,24 @@ async def handle_usage(user_text: str, result: InterceptResult) -> dict[str, Any
 
 async def handle_help(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show available commands."""
-    content = """**可用命令**
+    content = """**拦截器命令**（不消耗 LLM token）
 
-- `/dashboard` (仪表盘) — 任务面板
-- `/tasks` (任务列表) — 查看任务
-- `/model` (当前模型) — 查看/切换模型
-- `/new` (新对话) — 开始新对话
-- `/plan` (计划状态) — 查看计划进度
-- `/usage` (花费) — Token 用量统计
-- `/timeline` (时间线) — 活动记录
-- `/status` (系统状态) — 系统信息
-- `/commands` (命令列表) — 所有命令
-- `/stop` (停止) — 停止当前任务
-- `/compact` (压缩) — 压缩上下文
-- `/help` (帮助) — 显示此帮助
+- `/dashboard` — 仪表盘（任务+计划+session）
+- `/tasks` — 任务列表
+- `/model` — 当前模型
+- `/plan` — 计划状态
+- `/usage` — Token 用量
+- `/status` — 系统状态
+- `/timeline` — 活动时间线
+- `/commands` — 命令列表
+- `/help` — 帮助
 
-💡 以上命令由拦截器直接处理，不消耗 LLM token"""
+**转发命令**（拦截器通知 + OpenClaw 处理）
+- `/new` — 新对话
+- `/stop` — 停止任务
+- `/compact` — 压缩上下文
+
+中文别名也可以用，如"仪表盘"、"任务列表"等。"""
 
     return _make_card("❓ 帮助", content, template="green")
 
@@ -240,15 +278,7 @@ async def handle_timeline(user_text: str, result: InterceptResult) -> dict[str, 
             tid = t.get("id", "?")
             desc = (t.get("description") or "")[:50]
             completed = t.get("completed_at", "")
-            if completed:
-                try:
-                    from datetime import datetime
-                    dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
-                    time_str = dt.strftime("%m-%d %H:%M")
-                except (ValueError, AttributeError):
-                    time_str = completed[:16]
-            else:
-                time_str = "?"
+            time_str = completed[:16] if completed else "?"
             lines.append(f"✅ `{tid}` {desc}")
             lines.append(f"   🕐 {time_str}")
 
@@ -261,25 +291,36 @@ async def handle_timeline(user_text: str, result: InterceptResult) -> dict[str, 
 async def handle_status(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show system status."""
     try:
-        rc, stdout, stderr = _run_cmd(
-            "openclaw", "sessions", "--active", "5", "--json",
-        )
-        sessions = json.loads(stdout) if stdout.strip() and rc == 0 else []
-        model = sessions[0].get("model", "unknown") if sessions else "unknown"
+        sessions = _get_sessions(5)
+        model = "unknown"
+        context = "?"
+        for s in sessions:
+            if not isinstance(s, dict):
+                continue
+            if s.get("model"):
+                model = s["model"]
+            ctx = s.get("totalTokens", 0) or 0
+            max_ctx = s.get("contextTokens", 128000) or 128000
+            if ctx > 0:
+                context = f"{ctx // 1000}k / {max_ctx // 1000}k ({ctx * 100 // max_ctx}%)"
+                break
 
-        rc2, stdout2, _ = _run_cmd("luna-os", "task", "status")
-        task_status = json.loads(stdout2) if stdout2.strip() and rc2 == 0 else {}
-        counts = task_status.get("counts", {})
+        # Task counts
+        rc, stdout, _ = _run_cmd("luna-os", "task", "status")
+        task_info = ""
+        if rc == 0 and stdout.strip():
+            status = json.loads(stdout)
+            counts = status.get("counts", {})
+            task_info = f"运行: {counts.get('running', 0)} | 排队: {counts.get('queued', 0)}"
 
         content = f"""**系统状态**
 
 - 模型：`{model}`
-- 活跃 session：{len(sessions)}
-- 运行中任务：{counts.get('running', 0)}
-- 排队中任务：{counts.get('queued', 0)}
-- 拦截器：✅ 运行中"""
+- 上下文：{context}
+- 任务：{task_info}
+- Session 数：{len(sessions)} 个（5 分钟内活跃）"""
 
-        return _make_card("🔧 系统状态", content, template="green")
+        return _make_card("📊 系统状态", content)
     except Exception as e:
         logger.exception("Status handler failed")
         return _make_error_card(str(e))
@@ -290,31 +331,28 @@ async def handle_commands(user_text: str, result: InterceptResult) -> dict[str, 
     from luna_os.interceptor.registry import CommandRegistry
 
     registry = CommandRegistry()
-    lines = ["**已注册命令**\n"]
-    for cmd in registry.all_commands():
-        primary = cmd.patterns[0] if cmd.patterns else cmd.id
-        aliases = ", ".join(cmd.patterns[1:3]) if len(cmd.patterns) > 1 else ""
-        alias_str = f" ({aliases})" if aliases else ""
-        lines.append(f"- `{primary}`{alias_str}")
+    cmds = list(registry.all_commands())
 
-    lines.append(f"\n共 {len(registry.all_commands())} 个命令")
+    lines = [f"**已注册 {len(cmds)} 个命令**\n"]
+    for cmd in cmds:
+        patterns = ", ".join(cmd.patterns[:3])
+        lines.append(f"- `{cmd.id}` — {patterns}")
+
     return _make_card("📜 命令列表", "\n".join(lines))
 
 
 async def handle_stop(user_text: str, result: InterceptResult) -> dict[str, Any]:
-    """Stop — forward to OpenClaw."""
     return _make_card(
         "🛑 停止",
-        "停止请求已收到。\n\n⚠️ 此命令需要 OpenClaw 处理，消息已转发。",
+        "停止请求已收到，消息已转发给 OpenClaw 处理。",
         template="red",
     )
 
 
 async def handle_compact(user_text: str, result: InterceptResult) -> dict[str, Any]:
-    """Compact — forward to OpenClaw."""
     return _make_card(
         "📦 压缩上下文",
-        "压缩请求已收到。\n\n⚠️ 此命令需要 OpenClaw 处理，消息已转发。",
+        "压缩请求已收到，消息已转发给 OpenClaw 处理。",
         template="orange",
     )
 
