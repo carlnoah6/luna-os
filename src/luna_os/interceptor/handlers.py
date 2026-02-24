@@ -256,7 +256,7 @@ async def handle_timeline(user_text: str, result: InterceptResult) -> dict[str, 
                 try:
                     dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
                     time_str = dt.strftime("%m-%d %H:%M")
-                except:
+                except (ValueError, AttributeError):
                     time_str = completed[:16]
             else:
                 time_str = "unknown"
