@@ -277,8 +277,12 @@ HANDLER_REGISTRY: dict[str, Callable[[str, InterceptResult], Any]] = {
     "dashboard": handle_dashboard,
     "task_list": handle_task_list,
     "model": handle_model,
+    "model_switch": handle_model,
     "new": handle_new,
+    "new_session": handle_new,
     "help": handle_help,
     "cost": handle_cost,
+    "token_usage": handle_cost,
+    "plan_status": handle_dashboard,  # reuse dashboard for now
     "timeline": handle_timeline,
 }

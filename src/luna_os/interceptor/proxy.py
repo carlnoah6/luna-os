@@ -10,6 +10,7 @@ Architecture:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -114,18 +115,26 @@ class InterceptorProxy:
         )
 
         handler_fn = self._handlers.get(result.handler or "")
-        if handler_fn:
-            try:
-                response_data = await handler_fn(user_text, result)
-            except Exception:
-                logger.exception("Handler %s failed", result.handler)
-                return await self._forward(request, body)
-        else:
-            response_data = {
-                "msg": f"Command '{result.command_id}' matched but no handler registered yet."
-            }
+        if not handler_fn:
+            logger.warning("No handler for %s, forwarding", result.command_id)
+            return await self._forward(request, body)
 
-        return web.json_response(response_data)
+        try:
+            response_data = await handler_fn(user_text, result)
+        except Exception:
+            logger.exception("Handler %s failed", result.handler)
+            return await self._forward(request, body)
+
+        # Send the response back to the chat via Feishu API
+        chat_id = self._extract_chat_id(body)
+        if chat_id and response_data:
+            try:
+                await self._send_to_chat(chat_id, response_data)
+            except Exception:
+                logger.exception("Failed to send response to chat %s", chat_id)
+
+        # Return empty 200 to Feishu webhook (must respond within 3s)
+        return web.json_response({})
 
     async def _proxy_passthrough(self, request: web.Request) -> web.Response:
         """Forward any non-event request to upstream."""
@@ -138,18 +147,24 @@ class InterceptorProxy:
 
     async def _forward(self, request: web.Request, body: bytes) -> web.Response:
         """Forward request to upstream and relay the response."""
+        import aiohttp
+
         assert self._session is not None
-        url = f"{self.upstream}/{request.match_info.get('path', '')}"
+        # Use request.path to preserve the original URL path (named routes
+        # don't populate match_info['path']).
+        path = request.path.lstrip("/")
+        url = f"{self.upstream}/{path}"
         if request.query_string:
             url += f"?{request.query_string}"
 
         try:
+            timeout = aiohttp.ClientTimeout(total=2.5)  # Feishu expects <3s
             async with self._session.request(
                 method=request.method,
                 url=url,
                 headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
                 data=body,
-                timeout=None,
+                timeout=timeout,
             ) as resp:
                 resp_body = await resp.read()
                 return web.Response(
@@ -185,3 +200,36 @@ class InterceptorProxy:
 
         # Fallback: check for plain text field
         return event.get("text", data.get("text"))
+
+    @staticmethod
+    def _extract_chat_id(body: bytes) -> str | None:
+        """Extract chat_id from a Feishu event payload."""
+        try:
+            data = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        event = data.get("event", {})
+        message = event.get("message", {})
+        return message.get("chat_id") or event.get("chat_id")
+
+    async def _send_to_chat(self, chat_id: str, response_data: dict[str, Any]) -> None:
+        """Send handler response to the chat via Feishu API (async, non-blocking)."""
+        from luna_os.notifications.lark import LarkProvider
+
+        loop = asyncio.get_event_loop()
+
+        def _send() -> None:
+            lark = LarkProvider()
+            logger.info("Sending response to chat %s, msg_type=%s", chat_id, response_data.get("msg_type"))
+            if response_data.get("msg_type") == "interactive":
+                result = lark.send_card(chat_id, response_data["card"])
+                logger.info("Card sent: %s", result)
+            else:
+                text = response_data.get("text") or response_data.get("msg", "")
+                if text:
+                    result = lark.send_message(chat_id, text)
+                    logger.info("Text sent: %s", result)
+                else:
+                    logger.warning("No text/card to send for response: %s", response_data)
+
+        await loop.run_in_executor(None, _send)
