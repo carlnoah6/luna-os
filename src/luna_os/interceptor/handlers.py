@@ -72,46 +72,27 @@ def _get_sessions(active_minutes: int = 5) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 async def handle_dashboard(user_text: str, result: InterceptResult) -> dict[str, Any]:
-    """Show the task/plan dashboard."""
+    """Show the task/plan dashboard using the existing card builder."""
     try:
-        # Task status
-        rc, stdout, stderr = _run_cmd("luna-os", "task", "status")
+        import os
+        card_builder = os.path.expanduser(
+            "~/.openclaw/workspace/scripts/lark-card-builder.py"
+        )
+        rc, stdout, stderr = _run_cmd("python3", card_builder, timeout=15)
         if rc != 0:
-            return _make_error_card(f"task status failed: {stderr}")
+            return _make_error_card(f"card builder failed: {stderr}")
 
-        status = json.loads(stdout)
-        total = status.get("total", 0)
-        counts = status.get("counts", {})
+        card = json.loads(stdout)
+        # Prepend [拦截器] to the title
+        header = card.get("header", {})
+        title = header.get("title", {})
+        if title.get("content"):
+            title["content"] = f"{PREFIX} {title['content']}"
 
-        # Active plans
-        rc2, plan_out, _ = _run_cmd("luna-os", "plan", "list", "--status", "active")
-        active_plans = []
-        if rc2 == 0 and plan_out.strip():
-            for line in plan_out.strip().split("\n"):
-                line = line.strip()
-                if line and "[active]" in line:
-                    active_plans.append(line)
-
-        # Active sessions
-        sessions = _get_sessions(5)
-
-        content = f"""**任务统计**
-- 总任务数：{total}
-- 运行中：{counts.get('running', 0)}
-- 排队中：{counts.get('queued', 0)}
-- 已完成：{counts.get('done', 0)}
-- 失败：{counts.get('failed', 0)}
-
-**活跃计划** ({len(active_plans)} 个)"""
-
-        for p in active_plans[:5]:
-            content += f"\n- {p}"
-        if len(active_plans) > 5:
-            content += f"\n- ... 还有 {len(active_plans) - 5} 个"
-
-        content += f"\n\n**活跃 Session**: {len(sessions)} 个"
-
-        return _make_card("📊 仪表盘", content)
+        return {"msg_type": "interactive", "card": card}
+    except Exception as e:
+        logger.exception("Dashboard handler failed")
+        return _make_error_card(str(e))
     except Exception as e:
         logger.exception("Dashboard handler failed")
         return _make_error_card(str(e))
