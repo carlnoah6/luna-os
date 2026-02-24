@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from luna_os.interceptor.types import InterceptResult
 
@@ -40,23 +40,41 @@ def _make_error_card(error_msg: str) -> dict[str, Any]:
 async def handle_dashboard(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show the task/plan dashboard."""
     try:
+        # Get task status
         proc = await asyncio.create_subprocess_exec(
-            "luna-os", "dashboard",
+            "luna-os", "task", "status",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        
+
         if proc.returncode != 0:
             error = stderr.decode() if stderr else "Unknown error"
-            return _make_error_card(f"Dashboard command failed: {error}")
-        
-        output = stdout.decode().strip()
-        if not output:
-            output = "No active tasks or plans."
-        
-        return _make_card("📊 Dashboard", output, template="blue")
-    
+            return _make_error_card(f"Task status failed: {error}")
+
+        import json
+        status = json.loads(stdout.decode())
+
+        # Format dashboard
+        total = status.get("total", 0)
+        counts = status.get("counts", {})
+        running = counts.get("running", 0)
+        queued = counts.get("queued", 0)
+        done = counts.get("done", 0)
+        failed = counts.get("failed", 0)
+
+        content = f"""**任务统计**
+
+- 总任务数：{total}
+- 运行中：{running}
+- 排队中：{queued}
+- 已完成：{done}
+- 失败：{failed}
+
+使用 `任务列表` 查看详细信息。"""
+
+        return _make_card("📊 Dashboard", content, template="blue")
+
     except Exception as e:
         logger.exception("Dashboard handler failed")
         return _make_error_card(str(e))
@@ -66,22 +84,43 @@ async def handle_task_list(user_text: str, result: InterceptResult) -> dict[str,
     """List current tasks."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "luna-os", "task", "list",
+            "luna-os", "task", "active",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        
+
         if proc.returncode != 0:
             error = stderr.decode() if stderr else "Unknown error"
-            return _make_error_card(f"Task list command failed: {error}")
-        
-        output = stdout.decode().strip()
-        if not output:
-            output = "No tasks found."
-        
-        return _make_card("📋 Task List", output, template="blue")
-    
+            return _make_error_card(f"Task list failed: {error}")
+
+        import json
+        tasks = json.loads(stdout.decode())
+
+        if not tasks:
+            return _make_card("📋 Task List", "当前没有活跃任务。", template="blue")
+
+        # Format task list
+        lines = ["**活跃任务：**\n"]
+        for task in tasks[:10]:  # Show max 10 tasks
+            tid = task.get("id", "")
+            desc = task.get("description", "")[:60]
+            status = task.get("status", "")
+            elapsed = task.get("elapsed_min", 0)
+
+            status_emoji = {
+                "running": "🔄",
+                "queued": "⏳",
+                "waiting": "⏸️",
+            }.get(status, "❓")
+
+            lines.append(f"{status_emoji} `{tid}` - {desc}")
+            if elapsed > 0:
+                lines.append(f"   ⏱️ {elapsed:.0f} 分钟")
+
+        content = "\n".join(lines)
+        return _make_card("📋 Task List", content, template="blue")
+
     except Exception as e:
         logger.exception("Task list handler failed")
         return _make_error_card(str(e))
@@ -99,7 +138,7 @@ async def handle_model(user_text: str, result: InterceptResult) -> dict[str, Any
             "gpt-4": "gpt-4",
             "gpt-3.5": "gpt-3.5-turbo",
         }
-        
+
         for keyword, model_name in model_keywords.items():
             if keyword in text_lower:
                 # TODO: Implement model switching via config update
@@ -109,7 +148,7 @@ async def handle_model(user_text: str, result: InterceptResult) -> dict[str, Any
                     f"Please update your config manually.",
                     template="yellow",
                 )
-        
+
         # Show current model
         # TODO: Read from actual config
         return _make_card(
@@ -118,7 +157,7 @@ async def handle_model(user_text: str, result: InterceptResult) -> dict[str, Any
             "To switch models, mention the model name (e.g., 'use opus', 'switch to haiku')",
             template="blue",
         )
-    
+
     except Exception as e:
         logger.exception("Model handler failed")
         return _make_error_card(str(e))
@@ -164,7 +203,7 @@ async def handle_help(user_text: str, result: InterceptResult) -> dict[str, Any]
    示例：`help` `帮助` `你能做什么`
 """
         return _make_card("❓ Help", help_text, template="blue")
-    
+
     except Exception as e:
         logger.exception("Help handler failed")
         return _make_error_card(str(e))
@@ -187,23 +226,47 @@ async def handle_cost(user_text: str, result: InterceptResult) -> dict[str, Any]
 async def handle_timeline(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show activity timeline."""
     try:
+        # Get recent completed tasks
         proc = await asyncio.create_subprocess_exec(
-            "luna-os", "timeline",
+            "luna-os", "task", "list", "done",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        
+
         if proc.returncode != 0:
-            error = stderr.decode() if stderr else "Unknown error"
-            return _make_error_card(f"Timeline command failed: {error}")
-        
-        output = stdout.decode().strip()
-        if not output:
-            output = "No recent activity."
-        
-        return _make_card("📈 Timeline", output, template="blue")
-    
+            return _make_card("📈 Timeline", "暂无最近活动记录。", template="blue")
+
+        import json
+        tasks = json.loads(stdout.decode())
+
+        if not tasks:
+            return _make_card("📈 Timeline", "暂无最近活动记录。", template="blue")
+
+        # Show last 5 completed tasks
+        lines = ["**最近完成的任务：**\n"]
+        for task in tasks[:5]:
+            tid = task.get("id", "")
+            desc = task.get("description", "")[:50]
+            completed = task.get("completed_at", "")
+
+            # Format timestamp
+            if completed:
+                from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+                    time_str = dt.strftime("%m-%d %H:%M")
+                except (ValueError, AttributeError):
+                    time_str = completed[:16]
+            else:
+                time_str = "unknown"
+
+            lines.append(f"✅ `{tid}` - {desc}")
+            lines.append(f"   🕐 {time_str}")
+
+        content = "\n".join(lines)
+        return _make_card("📈 Timeline", content, template="blue")
+
     except Exception as e:
         logger.exception("Timeline handler failed")
         return _make_error_card(str(e))
