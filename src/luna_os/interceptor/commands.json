@@ -50,6 +50,13 @@
       "handler": "help",
       "description": "Show available commands",
       "examples": ["/help", "你能做什么"]
+    },
+    {
+      "id": "timeline",
+      "patterns": ["时间线", "timeline", "活动记录", "最近做了什么"],
+      "handler": "timeline",
+      "description": "Show activity timeline",
+      "examples": ["看看时间线", "activity log", "最近的活动"]
     }
   ]
 }
