@@ -776,8 +776,7 @@ Report results to: {chat_id}
                 task_chat_id = ""
                 if self.notifications:
                     try:
-                        # Fallback to hardcoded owner_id if env var is not set
-                        owner_id = os.environ.get("LARK_OWNER_ID", "") or "ou_35f664e694dd100adf97b867e68e1d3a"
+                        owner_id = os.environ.get("LARK_OWNER_ID", "")
                         members = [owner_id] if owner_id else []
                         logger.info(
                             "Creating task chat: owner_id=%s members=%s",

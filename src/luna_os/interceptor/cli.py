@@ -51,6 +51,7 @@ def _serve(args: list[str]) -> None:
         format="%(asctime)s [interceptor] %(levelname)s %(message)s",
     )
 
+    from luna_os.interceptor.handlers import HANDLER_REGISTRY
     from luna_os.interceptor.matcher import CommandMatcher
     from luna_os.interceptor.proxy import InterceptorProxy
     from luna_os.interceptor.registry import CommandRegistry
@@ -61,6 +62,7 @@ def _serve(args: list[str]) -> None:
         matcher,
         listen_port=opts.port,
         upstream=opts.upstream,
+        handler_registry=HANDLER_REGISTRY,
     )
     proxy.run()
 
