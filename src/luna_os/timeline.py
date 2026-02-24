@@ -284,7 +284,7 @@ phased.forEach(s => {{
 }});
 
 const nodeW = 200, gapY = 10, phaseGap = 90, labelH = 36;
-const COLS_PER_ROW = 3, svgPad = 60, wrapMargin = 70, topPad = 60;
+const COLS_PER_ROW = 3, svgPad = 60, wrapMargin = 90, topPad = 60;
 const arrowLineSpacing = 8, baseRowGap = 50;
 const graph = document.getElementById('graph');
 
