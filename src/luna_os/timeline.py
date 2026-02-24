@@ -284,7 +284,7 @@ phased.forEach(s => {{
 }});
 
 const nodeW = 200, gapY = 10, phaseGap = 90, labelH = 36;
-const COLS_PER_ROW = 3, svgPad = 60, wrapMargin = 30, topPad = 60;
+const COLS_PER_ROW = 3, svgPad = 60, wrapMargin = 70, topPad = 60;
 const arrowLineSpacing = 8, baseRowGap = 50;
 const graph = document.getElementById('graph');
 
@@ -326,6 +326,8 @@ steps.forEach(s => {{ measuredH[s.id] = nodeElements[s.id].offsetHeight; }});
 // --- Layout independent steps at the top ---
 const nodePositions = {{}};
 let totalW = 0, totalH = 0;
+const rowMaxH = {{}};
+const rowY = {{}};
 let phasedStartY = topPad;
 
 if (independent.length > 0) {{
@@ -389,7 +391,6 @@ if (phased.length > 0) {{
     }}
 
     const numRows = Math.floor(maxPhase / COLS_PER_ROW) + 1;
-    const rowMaxH = {{}};
     for (let r = 0; r < numRows; r++) {{
         let maxH = 0;
         for (let c = 0; c < COLS_PER_ROW; c++) {{
@@ -416,7 +417,6 @@ if (phased.length > 0) {{
         }});
     }});
 
-    const rowY = {{}};
     let cumY = phasedStartY;
     for (let r = 0; r < numRows; r++) {{
         rowY[r] = cumY;
@@ -586,25 +586,26 @@ steps.forEach(s => {{
         }} else {{
             const x1 = from.cx + 2, y1 = from.cy;
             const x2 = to.lx - 2, y2 = to.ly;
-            // Cross-row: compact polyline that stays close to the nodes
+            // Cross-row: drop down right after source node, travel horizontally
+            // in the gap between rows, then rise up to target node
             const gapKey = fromRow + '-' + toRow;
             if (!crossRowArrowIdx[gapKey]) crossRowArrowIdx[gapKey] = 0;
-            const vOffset = crossRowArrowIdx[gapKey] * arrowLineSpacing;
+            const idx = crossRowArrowIdx[gapKey];
             crossRowArrowIdx[gapKey]++;
-            // Find the gap between rows — route arrows above the second row
-            const fromBottom = from.bottom || from.cy + 20;
-            const toTop = to.top || to.cy - 20;
-            // Place the horizontal segment just below the first row
-            // (30% into the gap, not 50%) to avoid overlapping Phase labels
-            const gapMid = fromBottom + (toTop - fromBottom) * 0.25;
-            // Stay close: extend only 20px beyond the rightmost node
-            const margin = 20 + vOffset;
-            const turnX = Math.max(x1, x2) + margin;
-            // Offset the descent line further left to leave room for arrowheads
-            const descentX = x2 - 20 - vOffset;
+            const vOffset = idx * arrowLineSpacing;
+            // Find the gap between rows for horizontal segment
+            const fromRowBottom = rowY[fromRow] + rowMaxH[fromRow];
+            const toRowTop = rowY[toRow];
+            // Place horizontal segments evenly in the gap
+            const gapStart = fromRowBottom + (toRowTop - fromRowBottom) * 0.3;
+            const gapMid = gapStart + vOffset;
+            // Drop down right after source node (x1 + small margin)
+            const dropX = x1 + 10 + vOffset;
+            // Rise up just before target node
+            const riseX = x2 - 15 - vOffset;
             path.setAttribute('d',
-                `M${{x1}},${{y1}} H${{turnX}} `
-                + `V${{gapMid}} H${{descentX}} V${{y2}} H${{x2}}`);
+                `M${{x1}},${{y1}} H${{dropX}} `
+                + `V${{gapMid}} H${{riseX}} V${{y2}} H${{x2}}`);
         }}
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', strokeColor);
@@ -641,22 +642,30 @@ def render_png(html_content: str, output_path: str) -> str:
             page.goto(f"file://{html_file}")
             page.wait_for_timeout(300)
             dims = page.evaluate(
-                "() => { const c = document.querySelector('.container');"
-                " return { w: c.scrollWidth, h: c.scrollHeight }; }"
+                "() => { const g = document.getElementById('graph');"
+                " const c = document.querySelector('.container');"
+                " const gw = g ? g.scrollWidth : 0; const gh = g ? g.scrollHeight : 0;"
+                " const cw = c.scrollWidth; const ch = c.scrollHeight;"
+                " return { w: Math.max(gw, cw), h: Math.max(gh, ch) }; }"
             )
-            need_w = max(1100, dims["w"] + 80)
-            need_h = max(600, dims["h"] + 80)
+            pad = 32
+            need_w = max(1100, dims["w"] + pad * 2)
+            need_h = max(600, dims["h"] + pad * 2)
             page.set_viewport_size({"width": need_w, "height": need_h})
             page.wait_for_timeout(200)
-            container = page.query_selector(".container")
-            box = container.bounding_box()
+            # Precise clip: measure actual content bounds
+            box = page.evaluate(
+                "() => { const c = document.querySelector('.container');"
+                " const r = c.getBoundingClientRect();"
+                " return { x: r.x, y: r.y, w: r.width, h: r.height }; }"
+            )
             page.screenshot(
                 path=output_path,
                 clip={
-                    "x": box["x"] - 16,
-                    "y": box["y"] - 16,
-                    "width": box["width"] + 32,
-                    "height": box["height"] + 32,
+                    "x": max(0, box["x"] - pad),
+                    "y": max(0, box["y"] - pad),
+                    "width": box["w"] + pad * 2,
+                    "height": box["h"] + pad * 2,
                 },
             )
             browser.close()
