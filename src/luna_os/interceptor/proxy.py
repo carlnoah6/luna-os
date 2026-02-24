@@ -45,6 +45,7 @@ class InterceptorProxy:
         self._session: ClientSession | None = None
         self._app = web.Application()
         self._app.router.add_post("/webhook/event", self._handle_event)
+        self._app.router.add_post("/feishu/events", self._handle_event)
         self._app.router.add_route("*", "/{path:.*}", self._proxy_passthrough)
         self._app.on_startup.append(self._on_startup)
         self._app.on_cleanup.append(self._on_cleanup)
