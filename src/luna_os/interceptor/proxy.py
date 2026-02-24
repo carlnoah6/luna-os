@@ -45,6 +45,7 @@ class InterceptorProxy:
         self._session: ClientSession | None = None
         self._app = web.Application()
         self._app.router.add_post("/webhook/event", self._handle_event)
+        self._app.router.add_post("/feishu/events", self._handle_event)
         self._app.router.add_route("*", "/{path:.*}", self._proxy_passthrough)
         self._app.on_startup.append(self._on_startup)
         self._app.on_cleanup.append(self._on_cleanup)
@@ -84,9 +85,15 @@ class InterceptorProxy:
         t0 = time.monotonic()
         body = await request.read()
 
+        # Debug: log request body
+        logger.debug("Request body: %s", body.decode()[:500])
+
         # Parse the Feishu event to extract user text
         user_text = self._extract_text(body)
+        logger.debug("Extracted text: %r", user_text)
+        
         if not user_text:
+            logger.debug("No text extracted, forwarding to upstream")
             return await self._forward(request, body)
 
         # Run matcher
