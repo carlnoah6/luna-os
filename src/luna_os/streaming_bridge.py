@@ -319,8 +319,37 @@ def run_bridge(
         time.sleep(UPDATE_INTERVAL)
 
     # Close card with final content
-    final = "\n\n".join(accumulated) if accumulated else "\u2705 \u5b8c\u6210"
-    card.close(final)
+    final_text = "\n\n".join(accumulated) if accumulated else "✅ 完成"
+    
+    # Append model name if task_id is provided
+    if task_id:
+        try:
+            from luna_os.store.postgres import PostgresBackend
+            store = PostgresBackend()
+            task = store.get_task(task_id)
+            if task and task.source_chat:
+                # Find the plan and step for this task
+                plans = store.list_plans(status="active")
+                for p in plans:
+                    if p.chat_id == task.source_chat:
+                        plan = store.get_plan(p.id)
+                        if plan:
+                            for step in plan.steps:
+                                if step.task_id == task_id:
+                                    # Found the step, get model
+                                    model = step.model or "api-proxy-claude/claude-sonnet-4-6"
+                                    # Extract model name (remove provider prefix)
+                                    if "/" in model:
+                                        model_name = model.split("/", 1)[1]
+                                    else:
+                                        model_name = model
+                                    final_text += f"\n\n💡 {model_name}"
+                                    break
+                        break
+        except Exception as exc:
+            logger.warning("Failed to get model name: %s", exc)
+    
+    card.close(final_text)
     logger.info("Bridge finished")
 
 
