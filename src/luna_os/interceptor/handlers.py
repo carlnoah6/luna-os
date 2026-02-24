@@ -71,7 +71,7 @@ def _get_sessions(active_minutes: int = 5) -> list[dict[str, Any]]:
 # Handlers
 # ---------------------------------------------------------------------------
 
-async def handle_dashboard(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_dashboard(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """Show the task/plan dashboard using the existing card builder."""
     try:
         import os
@@ -98,7 +98,7 @@ async def handle_dashboard(user_text: str, result: InterceptResult) -> dict[str,
         return _make_error_card(str(e))
 
 
-async def handle_tasks(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_tasks(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """List current tasks."""
     try:
         rc, stdout, stderr = _run_cmd("luna-os", "task", "list", "--status", "running,queued")
@@ -126,7 +126,7 @@ async def handle_tasks(user_text: str, result: InterceptResult) -> dict[str, Any
         return _make_error_card(str(e))
 
 
-async def handle_model(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_model(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """Show current model info."""
     try:
         sessions = _get_sessions(10)
@@ -147,7 +147,7 @@ async def handle_model(user_text: str, result: InterceptResult) -> dict[str, Any
         return _make_error_card(str(e))
 
 
-async def handle_new(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_new(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     return _make_card(
         "🔄 新对话",
         "新对话请求已收到，消息已转发给 OpenClaw 处理。",
@@ -155,7 +155,7 @@ async def handle_new(user_text: str, result: InterceptResult) -> dict[str, Any]:
     )
 
 
-async def handle_plan(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_plan(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """Show current plan status."""
     try:
         rc, stdout, stderr = _run_cmd("luna-os", "plan", "list", "--status", "active")
@@ -183,7 +183,7 @@ async def handle_plan(user_text: str, result: InterceptResult) -> dict[str, Any]
         return _make_error_card(str(e))
 
 
-async def handle_usage(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_usage(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """Show token usage / cost."""
     try:
         sessions = _get_sessions(60)
@@ -217,7 +217,7 @@ async def handle_usage(user_text: str, result: InterceptResult) -> dict[str, Any
         return _make_error_card(str(e))
 
 
-async def handle_help(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_help(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """Show available commands."""
     content = """**拦截器命令**（不消耗 LLM token）
 
@@ -241,7 +241,7 @@ async def handle_help(user_text: str, result: InterceptResult) -> dict[str, Any]
     return _make_card("❓ 帮助", content, template="green")
 
 
-async def handle_timeline(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_timeline(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """Show activity timeline."""
     try:
         rc, stdout, stderr = _run_cmd(
@@ -269,7 +269,7 @@ async def handle_timeline(user_text: str, result: InterceptResult) -> dict[str, 
         return _make_error_card(str(e))
 
 
-async def handle_status(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_status(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """Show system status."""
     try:
         sessions = _get_sessions(5)
@@ -307,7 +307,7 @@ async def handle_status(user_text: str, result: InterceptResult) -> dict[str, An
         return _make_error_card(str(e))
 
 
-async def handle_commands(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_commands(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """List all registered commands."""
     from luna_os.interceptor.registry import CommandRegistry
 
@@ -322,7 +322,7 @@ async def handle_commands(user_text: str, result: InterceptResult) -> dict[str, 
     return _make_card("📜 命令列表", "\n".join(lines))
 
 
-async def handle_stop(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_stop(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     return _make_card(
         "🛑 停止",
         "停止请求已收到，消息已转发给 OpenClaw 处理。",
@@ -330,7 +330,7 @@ async def handle_stop(user_text: str, result: InterceptResult) -> dict[str, Any]
     )
 
 
-async def handle_compact(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_compact(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     return _make_card(
         "📦 压缩上下文",
         "压缩请求已收到，消息已转发给 OpenClaw 处理。",
@@ -338,16 +338,67 @@ async def handle_compact(user_text: str, result: InterceptResult) -> dict[str, A
     )
 
 
-async def handle_share(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_share(user_text: str, result: InterceptResult, body: bytes) -> dict[str, Any]:
     """Create a share link for the current conversation."""
     import subprocess
     import json
     
-    session_id = result.session_id
-    if not session_id:
+    # Extract chat_id from webhook payload
+    try:
+        payload = json.loads(body.decode())
+        event = payload.get("event", {})
+        message = event.get("message", {})
+        chat_id = message.get("chat_id", "")
+        
+        if not chat_id:
+            return _make_card(
+                "❌ 分享失败",
+                "无法获取当前群聊 ID",
+                template="red",
+            )
+    except Exception as e:
         return _make_card(
             "❌ 分享失败",
-            "无法获取当前 session ID",
+            f"解析 webhook payload 失败: {e}",
+            template="red",
+        )
+    
+    # Find session_id from chat_id
+    try:
+        sessions_result = subprocess.run(
+            ["openclaw", "sessions", "--active", "60", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if sessions_result.returncode != 0:
+            return _make_card(
+                "❌ 分享失败",
+                f"查询 session 失败: {sessions_result.stderr}",
+                template="red",
+            )
+        
+        sessions_data = json.loads(sessions_result.stdout)
+        sessions = sessions_data.get("sessions", [])
+        
+        # Find session with matching chat_id
+        session_id = None
+        for session in sessions:
+            key = session.get("key", "")
+            if chat_id in key:
+                session_id = session.get("sessionId")
+                break
+        
+        if not session_id:
+            return _make_card(
+                "❌ 分享失败",
+                f"未找到群聊 {chat_id} 对应的 session",
+                template="red",
+            )
+    except Exception as e:
+        return _make_card(
+            "❌ 分享失败",
+            f"查询 session 失败: {e}",
             template="red",
         )
     

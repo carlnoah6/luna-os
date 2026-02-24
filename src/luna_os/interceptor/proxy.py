@@ -124,7 +124,7 @@ class InterceptorProxy:
             return await self._forward(request, body)
 
         try:
-            response_data = await handler_fn(user_text, result)
+            response_data = await handler_fn(user_text, result, body)
         except Exception:
             logger.exception("Handler %s failed", result.handler)
             return await self._forward(request, body)
