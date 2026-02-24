@@ -203,12 +203,14 @@ body {{
     font-weight: 600;
 }}
 .node-model {{
-    font-size: 9px;
-    color: #666;
+    font-size: 11px;
+    color: #333;
+    font-weight: 600;
     font-family: monospace;
-    background: #f5f5f5;
-    padding: 2px 5px;
+    background: #e8f4f8;
+    padding: 2px 6px;
     border-radius: 3px;
+    border: 1px solid #b3d9e8;
 }}
 .node-status-icon {{ font-size: 14px; flex-shrink: 0; }}
 .node.pending {{ border-left-color: #e0e0e0; }}
