@@ -73,6 +73,12 @@
       "patterns": ["/compact", "压缩上下文", "compact"],
       "handler": "compact",
       "description": "Compact current session context"
+    },
+    {
+      "id": "share",
+      "patterns": ["/share", "分享", "分享链接", "share", "给我一个分享链接"],
+      "handler": "share",
+      "description": "Create a share link for current conversation"
     }
   ]
 }

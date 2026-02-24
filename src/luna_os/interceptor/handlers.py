@@ -338,6 +338,70 @@ async def handle_compact(user_text: str, result: InterceptResult) -> dict[str, A
     )
 
 
+async def handle_share(user_text: str, result: InterceptResult) -> dict[str, Any]:
+    """Create a share link for the current conversation."""
+    import subprocess
+    import json
+    
+    session_id = result.session_id
+    if not session_id:
+        return _make_card(
+            "❌ 分享失败",
+            "无法获取当前 session ID",
+            template="red",
+        )
+    
+    # Call create_share_from_last_new.py
+    script_path = "/home/ubuntu/.openclaw/workspace/projects/luna-share/create_share_from_last_new.py"
+    try:
+        proc = subprocess.run(
+            ["python3", script_path, session_id],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        
+        if proc.returncode != 0:
+            return _make_card(
+                "❌ 分享失败",
+                f"脚本执行失败：{proc.stderr[:200]}",
+                template="red",
+            )
+        
+        # Parse JSON output from last line
+        lines = proc.stdout.strip().split('\n')
+        for line in reversed(lines):
+            if line.startswith('{'):
+                data = json.loads(line)
+                share_url = data.get('url', '')
+                message_count = data.get('message_count', 0)
+                
+                return _make_card(
+                    "✅ 分享链接已生成",
+                    f"🔗 {share_url}\n\n📝 包含 {message_count} 条消息",
+                    template="green",
+                )
+        
+        return _make_card(
+            "❌ 分享失败",
+            "无法解析脚本输出",
+            template="red",
+        )
+    
+    except subprocess.TimeoutExpired:
+        return _make_card(
+            "❌ 分享失败",
+            "脚本执行超时（30秒）",
+            template="red",
+        )
+    except Exception as e:
+        return _make_card(
+            "❌ 分享失败",
+            f"错误：{str(e)[:200]}",
+            template="red",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -361,4 +425,5 @@ HANDLER_REGISTRY: dict[str, Callable[[str, InterceptResult], Any]] = {
     "commands": handle_commands,
     "stop": handle_stop,
     "compact": handle_compact,
+    "share": handle_share,
 }
