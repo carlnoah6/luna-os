@@ -713,6 +713,9 @@ key action so the streaming card shows what you are doing. Example:
 - "Matrix multiplication done, computing eigenvalues..."
 This makes your work visible in real-time.
 
+**LANGUAGE: Use Chinese (中文) for all progress updates and final results.**
+All text output should be in Chinese unless you are writing code comments or technical documentation.
+
 ## Reporting (REQUIRED - session FAILS without this)
 
 **You MUST call one of these as your FINAL action.**
