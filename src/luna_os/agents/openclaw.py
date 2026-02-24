@@ -125,7 +125,7 @@ class OpenClawRunner(AgentRunner):
 
     def _set_session_model(self, session_key: str, model: str) -> None:
         """Set model override for a session by directly modifying sessions.json.
-        
+
         Parses model string (e.g., "api-proxy/kimi-k2.5") into provider/model
         and writes to the session store BEFORE spawning.
         """
@@ -133,35 +133,35 @@ class OpenClawRunner(AgentRunner):
         if len(parts) != 2:
             logger.warning("Invalid model format: %s (expected provider/model)", model)
             return
-        
+
         provider, model_name = parts
-        
+
         # Read sessions.json
         sessions_file = Path.home() / ".openclaw/agents/main/sessions/sessions.json"
         if not sessions_file.exists():
             logger.warning("Sessions file not found: %s", sessions_file)
             return
-        
+
         try:
             with open(sessions_file) as f:
                 sessions = json.load(f)
-            
+
             # Create or update session entry
             if session_key not in sessions:
                 sessions[session_key] = {
                     "sessionId": str(uuid.uuid4()),
                     "updatedAt": int(__import__("time").time() * 1000),
                 }
-            
+
             sessions[session_key]["providerOverride"] = provider
             sessions[session_key]["modelOverride"] = model_name
-            
+
             # Write back atomically
             tmp_file = sessions_file.with_suffix(".tmp")
             with open(tmp_file, "w") as f:
                 json.dump(sessions, f, indent=2)
             tmp_file.replace(sessions_file)
-            
+
             logger.info(
                 "Set model override: session=%s provider=%s model=%s",
                 session_key, provider, model_name,
