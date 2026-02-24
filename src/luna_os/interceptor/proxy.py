@@ -31,6 +31,10 @@ DEFAULT_UPSTREAM = os.environ.get("INTERCEPT_UPSTREAM", "http://127.0.0.1:3000")
 class InterceptorProxy:
     """aiohttp-based reverse proxy with command interception."""
 
+    # Commands that should be forwarded to upstream after sending the card
+    # (they need OpenClaw to actually process them)
+    FORWARD_AFTER_CARD = {"new", "stop", "compact"}
+
     def __init__(
         self,
         matcher: CommandMatcher,
@@ -132,6 +136,11 @@ class InterceptorProxy:
                 await self._send_to_chat(chat_id, response_data)
             except Exception:
                 logger.exception("Failed to send response to chat %s", chat_id)
+
+        # Some commands need OpenClaw to process them too
+        if result.command_id in self.FORWARD_AFTER_CARD:
+            logger.info("Forwarding %s to upstream after card", result.command_id)
+            return await self._forward(request, body)
 
         # Return empty 200 to Feishu webhook (must respond within 3s)
         return web.json_response({})

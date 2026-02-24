@@ -1,19 +1,23 @@
 """Command handlers for the interceptor.
 
 Each handler is an async function that takes (user_text, InterceptResult)
-and returns a Feishu card response dict.
+and returns a Feishu card response dict (or text dict).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import subprocess
 from collections.abc import Callable
 from typing import Any
 
 from luna_os.interceptor.types import InterceptResult
 
 logger = logging.getLogger(__name__)
+
+PREFIX = "[拦截器]"
 
 
 def _make_card(title: str, content: str, template: str = "blue") -> dict[str, Any]:
@@ -22,7 +26,7 @@ def _make_card(title: str, content: str, template: str = "blue") -> dict[str, An
         "msg_type": "interactive",
         "card": {
             "header": {
-                "title": {"content": title, "tag": "plain_text"},
+                "title": {"content": f"{PREFIX} {title}", "tag": "plain_text"},
                 "template": template,
             },
             "elements": [
@@ -33,256 +37,309 @@ def _make_card(title: str, content: str, template: str = "blue") -> dict[str, An
 
 
 def _make_error_card(error_msg: str) -> dict[str, Any]:
-    """Helper to create an error card."""
     return _make_card("❌ 错误", f"```\n{error_msg}\n```", template="red")
 
+
+def _run_cmd(*args: str, timeout: int = 10) -> tuple[int, str, str]:
+    """Run a command and return (returncode, stdout, stderr)."""
+    try:
+        proc = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+    except subprocess.TimeoutExpired:
+        return 1, "", "Command timed out"
+    except Exception as e:
+        return 1, "", str(e)
+
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
 
 async def handle_dashboard(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show the task/plan dashboard."""
     try:
-        # Get task status
-        proc = await asyncio.create_subprocess_exec(
-            "luna-os", "task", "status",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
+        rc, stdout, stderr = _run_cmd("luna-os", "task", "status")
+        if rc != 0:
+            return _make_error_card(f"task status failed: {stderr}")
 
-        if proc.returncode != 0:
-            error = stderr.decode() if stderr else "Unknown error"
-            return _make_error_card(f"Task status failed: {error}")
-
-        import json
-        status = json.loads(stdout.decode())
-
-        # Format dashboard
+        status = json.loads(stdout)
         total = status.get("total", 0)
         counts = status.get("counts", {})
-        running = counts.get("running", 0)
-        queued = counts.get("queued", 0)
-        done = counts.get("done", 0)
-        failed = counts.get("failed", 0)
 
         content = f"""**任务统计**
 
 - 总任务数：{total}
-- 运行中：{running}
-- 排队中：{queued}
-- 已完成：{done}
-- 失败：{failed}
+- 运行中：{counts.get('running', 0)}
+- 排队中：{counts.get('queued', 0)}
+- 已完成：{counts.get('done', 0)}
+- 失败：{counts.get('failed', 0)}"""
 
-使用 `任务列表` 查看详细信息。"""
-
-        return _make_card("📊 Dashboard", content, template="blue")
-
+        return _make_card("📊 仪表盘", content)
     except Exception as e:
         logger.exception("Dashboard handler failed")
         return _make_error_card(str(e))
 
 
-async def handle_task_list(user_text: str, result: InterceptResult) -> dict[str, Any]:
+async def handle_tasks(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """List current tasks."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "luna-os", "task", "active",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
+        rc, stdout, stderr = _run_cmd("luna-os", "task", "list", "--status", "running,queued")
+        if rc != 0:
+            return _make_error_card(f"task list failed: {stderr}")
 
-        if proc.returncode != 0:
-            error = stderr.decode() if stderr else "Unknown error"
-            return _make_error_card(f"Task list failed: {error}")
-
-        import json
-        tasks = json.loads(stdout.decode())
-
+        tasks = json.loads(stdout) if stdout.strip() else []
         if not tasks:
-            return _make_card("📋 Task List", "当前没有活跃任务。", template="blue")
+            return _make_card("📋 任务列表", "当前没有运行中或排队中的任务。", template="green")
 
-        # Format task list
-        lines = ["**活跃任务：**\n"]
-        for task in tasks[:10]:  # Show max 10 tasks
-            tid = task.get("id", "")
-            desc = task.get("description", "")[:60]
-            status = task.get("status", "")
-            elapsed = task.get("elapsed_min", 0)
+        lines = []
+        for t in tasks[:10]:
+            tid = t.get("id", "?")
+            desc = (t.get("description") or "")[:60]
+            status = t.get("status", "?")
+            emoji = {"running": "🔄", "queued": "⏳"}.get(status, "📌")
+            lines.append(f"{emoji} `{tid}` {desc}")
 
-            status_emoji = {
-                "running": "🔄",
-                "queued": "⏳",
-                "waiting": "⏸️",
-            }.get(status, "❓")
+        if len(tasks) > 10:
+            lines.append(f"\n... 还有 {len(tasks) - 10} 个任务")
 
-            lines.append(f"{status_emoji} `{tid}` - {desc}")
-            if elapsed > 0:
-                lines.append(f"   ⏱️ {elapsed:.0f} 分钟")
-
-        content = "\n".join(lines)
-        return _make_card("📋 Task List", content, template="blue")
-
+        return _make_card("📋 任务列表", "\n".join(lines))
     except Exception as e:
-        logger.exception("Task list handler failed")
+        logger.exception("Tasks handler failed")
         return _make_error_card(str(e))
 
 
 async def handle_model(user_text: str, result: InterceptResult) -> dict[str, Any]:
-    """Show or switch the current LLM model."""
+    """Show current model info."""
     try:
-        # Check if user wants to switch model
-        text_lower = user_text.lower()
-        model_keywords = {
-            "sonnet": "claude-sonnet-4",
-            "opus": "claude-opus-4",
-            "haiku": "claude-haiku-3.5",
-            "gpt-4": "gpt-4",
-            "gpt-3.5": "gpt-3.5-turbo",
-        }
-
-        for keyword, model_name in model_keywords.items():
-            if keyword in text_lower:
-                # TODO: Implement model switching via config update
-                return _make_card(
-                    "🔄 Model Switch",
-                    f"Model switching to `{model_name}` is not yet implemented.\n\n"
-                    f"Please update your config manually.",
-                    template="yellow",
-                )
-
-        # Show current model
-        # TODO: Read from actual config
-        return _make_card(
-            "🤖 Current Model",
-            "Current model: `claude-sonnet-4-6`\n\n"
-            "To switch models, mention the model name (e.g., 'use opus', 'switch to haiku')",
-            template="blue",
+        rc, stdout, stderr = _run_cmd(
+            "openclaw", "sessions", "--active", "5", "--json",
         )
+        if rc != 0:
+            return _make_error_card(f"sessions failed: {stderr}")
 
+        sessions = json.loads(stdout) if stdout.strip() else []
+        if sessions:
+            model = sessions[0].get("model", "unknown")
+        else:
+            model = "unknown"
+
+        content = f"""**当前模型**: `{model}`
+
+切换方式：直接说"用 sonnet/opus/haiku"
+或发送 `/model <provider/model>`"""
+
+        return _make_card("🧠 模型", content)
     except Exception as e:
         logger.exception("Model handler failed")
         return _make_error_card(str(e))
 
 
 async def handle_new(user_text: str, result: InterceptResult) -> dict[str, Any]:
-    """Start a new conversation session."""
+    """Start a new session — forward to OpenClaw."""
+    return _make_card(
+        "🔄 新对话",
+        "新对话请求已收到。\n\n⚠️ 此命令需要 OpenClaw 处理，消息已转发。",
+        template="orange",
+    )
+
+
+async def handle_plan(user_text: str, result: InterceptResult) -> dict[str, Any]:
+    """Show current plan status."""
     try:
-        return _make_card(
-            "✨ New Session",
-            "新对话已创建！\n\n请直接发送消息开始对话。",
-            template="green",
-        )
+        rc, stdout, stderr = _run_cmd("luna-os", "plan", "list", "--status", "active")
+        if rc != 0:
+            return _make_error_card(f"plan list failed: {stderr}")
+
+        plans = json.loads(stdout) if stdout.strip() else []
+        if not plans:
+            return _make_card("📐 计划状态", "当前没有活跃的计划。", template="green")
+
+        lines = []
+        for p in plans[:5]:
+            pid = p.get("id", "?")
+            goal = (p.get("goal") or "")[:60]
+            total = p.get("total_steps", 0)
+            done = p.get("done_steps", 0)
+            lines.append(f"📐 `{pid}` {goal}")
+            lines.append(f"   进度：{done}/{total} 步")
+
+        return _make_card("📐 计划状态", "\n".join(lines))
     except Exception as e:
-        logger.exception("New session handler failed")
+        logger.exception("Plan handler failed")
+        return _make_error_card(str(e))
+
+
+async def handle_usage(user_text: str, result: InterceptResult) -> dict[str, Any]:
+    """Show token usage / cost."""
+    try:
+        rc, stdout, stderr = _run_cmd(
+            "openclaw", "sessions", "--active", "60", "--json",
+        )
+        if rc != 0:
+            return _make_error_card(f"sessions failed: {stderr}")
+
+        sessions = json.loads(stdout) if stdout.strip() else []
+        total_in = 0
+        total_out = 0
+        for s in sessions:
+            total_in += s.get("tokensIn", 0)
+            total_out += s.get("tokensOut", 0)
+
+        content = f"""**最近 1 小时用量**
+
+- 活跃 session 数：{len(sessions)}
+- 输入 tokens：{total_in:,}
+- 输出 tokens：{total_out:,}
+- 总计：{total_in + total_out:,}"""
+
+        return _make_card("💰 用量统计", content)
+    except Exception as e:
+        logger.exception("Usage handler failed")
         return _make_error_card(str(e))
 
 
 async def handle_help(user_text: str, result: InterceptResult) -> dict[str, Any]:
-    """Show available commands and help."""
-    try:
-        help_text = """**可用命令：**
+    """Show available commands."""
+    content = """**可用命令**
 
-📊 **仪表盘** - 查看任务和计划进度
-   示例：`仪表盘` `dashboard` `看板`
+- `/dashboard` (仪表盘) — 任务面板
+- `/tasks` (任务列表) — 查看任务
+- `/model` (当前模型) — 查看/切换模型
+- `/new` (新对话) — 开始新对话
+- `/plan` (计划状态) — 查看计划进度
+- `/usage` (花费) — Token 用量统计
+- `/timeline` (时间线) — 活动记录
+- `/status` (系统状态) — 系统信息
+- `/commands` (命令列表) — 所有命令
+- `/stop` (停止) — 停止当前任务
+- `/compact` (压缩) — 压缩上下文
+- `/help` (帮助) — 显示此帮助
 
-📋 **任务列表** - 查看当前任务
-   示例：`任务列表` `tasks` `待办`
+💡 以上命令由拦截器直接处理，不消耗 LLM token"""
 
-🤖 **模型切换** - 切换或查看当前 LLM 模型
-   示例：`/model` `切换模型` `用 opus`
-
-✨ **新对话** - 开始新的对话会话
-   示例：`/new` `新对话` `重新开始`
-
-📈 **时间线** - 查看活动时间线
-   示例：`时间线` `timeline` `最近做了什么`
-
-💰 **费用统计** - 查看 token 使用情况
-   示例：`cost` `花了多少钱` `token usage`
-
-❓ **帮助** - 显示此帮助信息
-   示例：`help` `帮助` `你能做什么`
-"""
-        return _make_card("❓ Help", help_text, template="blue")
-
-    except Exception as e:
-        logger.exception("Help handler failed")
-        return _make_error_card(str(e))
-
-
-async def handle_cost(user_text: str, result: InterceptResult) -> dict[str, Any]:
-    """Show token usage and cost statistics."""
-    try:
-        return _make_card(
-            "💰 Cost Statistics",
-            "Token 统计功能开发中...\n\n"
-            "敬请期待！",
-            template="yellow",
-        )
-    except Exception as e:
-        logger.exception("Cost handler failed")
-        return _make_error_card(str(e))
+    return _make_card("❓ 帮助", content, template="green")
 
 
 async def handle_timeline(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show activity timeline."""
     try:
-        # Get recent completed tasks
-        proc = await asyncio.create_subprocess_exec(
-            "luna-os", "task", "list", "done",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        rc, stdout, stderr = _run_cmd(
+            "luna-os", "task", "list", "--status", "done", "--limit", "5",
         )
-        stdout, stderr = await proc.communicate()
+        if rc != 0:
+            return _make_error_card(f"task list failed: {stderr}")
 
-        if proc.returncode != 0:
-            return _make_card("📈 Timeline", "暂无最近活动记录。", template="blue")
-
-        import json
-        tasks = json.loads(stdout.decode())
-
+        tasks = json.loads(stdout) if stdout.strip() else []
         if not tasks:
-            return _make_card("📈 Timeline", "暂无最近活动记录。", template="blue")
+            return _make_card("📈 时间线", "暂无最近完成的任务。")
 
-        # Show last 5 completed tasks
-        lines = ["**最近完成的任务：**\n"]
-        for task in tasks[:5]:
-            tid = task.get("id", "")
-            desc = task.get("description", "")[:50]
-            completed = task.get("completed_at", "")
-
-            # Format timestamp
+        lines = []
+        for t in tasks[:5]:
+            tid = t.get("id", "?")
+            desc = (t.get("description") or "")[:50]
+            completed = t.get("completed_at", "")
             if completed:
-                from datetime import datetime
                 try:
+                    from datetime import datetime
                     dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
                     time_str = dt.strftime("%m-%d %H:%M")
                 except (ValueError, AttributeError):
                     time_str = completed[:16]
             else:
-                time_str = "unknown"
-
-            lines.append(f"✅ `{tid}` - {desc}")
+                time_str = "?"
+            lines.append(f"✅ `{tid}` {desc}")
             lines.append(f"   🕐 {time_str}")
 
-        content = "\n".join(lines)
-        return _make_card("📈 Timeline", content, template="blue")
-
+        return _make_card("📈 时间线", "\n".join(lines))
     except Exception as e:
         logger.exception("Timeline handler failed")
         return _make_error_card(str(e))
 
 
-# Handler registry - maps handler names to functions
+async def handle_status(user_text: str, result: InterceptResult) -> dict[str, Any]:
+    """Show system status."""
+    try:
+        rc, stdout, stderr = _run_cmd(
+            "openclaw", "sessions", "--active", "5", "--json",
+        )
+        sessions = json.loads(stdout) if stdout.strip() and rc == 0 else []
+        model = sessions[0].get("model", "unknown") if sessions else "unknown"
+
+        rc2, stdout2, _ = _run_cmd("luna-os", "task", "status")
+        task_status = json.loads(stdout2) if stdout2.strip() and rc2 == 0 else {}
+        counts = task_status.get("counts", {})
+
+        content = f"""**系统状态**
+
+- 模型：`{model}`
+- 活跃 session：{len(sessions)}
+- 运行中任务：{counts.get('running', 0)}
+- 排队中任务：{counts.get('queued', 0)}
+- 拦截器：✅ 运行中"""
+
+        return _make_card("🔧 系统状态", content, template="green")
+    except Exception as e:
+        logger.exception("Status handler failed")
+        return _make_error_card(str(e))
+
+
+async def handle_commands(user_text: str, result: InterceptResult) -> dict[str, Any]:
+    """List all registered commands."""
+    from luna_os.interceptor.registry import CommandRegistry
+
+    registry = CommandRegistry()
+    lines = ["**已注册命令**\n"]
+    for cmd in registry.all_commands():
+        primary = cmd.patterns[0] if cmd.patterns else cmd.id
+        aliases = ", ".join(cmd.patterns[1:3]) if len(cmd.patterns) > 1 else ""
+        alias_str = f" ({aliases})" if aliases else ""
+        lines.append(f"- `{primary}`{alias_str}")
+
+    lines.append(f"\n共 {len(registry.all_commands())} 个命令")
+    return _make_card("📜 命令列表", "\n".join(lines))
+
+
+async def handle_stop(user_text: str, result: InterceptResult) -> dict[str, Any]:
+    """Stop — forward to OpenClaw."""
+    return _make_card(
+        "🛑 停止",
+        "停止请求已收到。\n\n⚠️ 此命令需要 OpenClaw 处理，消息已转发。",
+        template="red",
+    )
+
+
+async def handle_compact(user_text: str, result: InterceptResult) -> dict[str, Any]:
+    """Compact — forward to OpenClaw."""
+    return _make_card(
+        "📦 压缩上下文",
+        "压缩请求已收到。\n\n⚠️ 此命令需要 OpenClaw 处理，消息已转发。",
+        template="orange",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
 HANDLER_REGISTRY: dict[str, Callable[[str, InterceptResult], Any]] = {
     "dashboard": handle_dashboard,
-    "task_list": handle_task_list,
+    "tasks": handle_tasks,
+    "task_list": handle_tasks,
     "model": handle_model,
     "model_switch": handle_model,
     "new": handle_new,
     "new_session": handle_new,
+    "plan": handle_plan,
+    "plan_status": handle_plan,
+    "usage": handle_usage,
+    "token_usage": handle_usage,
+    "cost": handle_usage,
     "help": handle_help,
-    "cost": handle_cost,
-    "token_usage": handle_cost,
-    "plan_status": handle_dashboard,  # reuse dashboard for now
     "timeline": handle_timeline,
+    "status": handle_status,
+    "commands": handle_commands,
+    "stop": handle_stop,
+    "compact": handle_compact,
 }
