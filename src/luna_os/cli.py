@@ -243,6 +243,24 @@ def task_cli(args: list[str]) -> None:
 
 def plan_cli(args: list[str]) -> None:
     """Handle 'plan' subcommands."""
+    # Configure logging for planner operations
+    # Write to both stderr and a dedicated file
+    import logging.handlers
+    
+    file_handler = logging.FileHandler('/tmp/planner-create-chat.log')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            file_handler,
+        ],
+        force=True,
+    )
+    
     if not args:
         print("Usage: luna-os plan <command> [args...]")
         sys.exit(1)
@@ -352,7 +370,7 @@ def main() -> None:
     elif top == "streaming-bridge":
         from luna_os.streaming_bridge import main as bridge_main
 
-        bridge_main()
+        bridge_main(rest)
     elif top == "session-overview":
         from luna_os.session_overview import main as overview_main
 

@@ -324,7 +324,7 @@ def run_bridge(
     logger.info("Bridge finished")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """CLI entry point for streaming-bridge."""
     import argparse
 
@@ -338,5 +338,5 @@ def main() -> None:
     parser.add_argument("chat_id")
     parser.add_argument("--task-id", default="")
     parser.add_argument("--timeout", type=int, default=900)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     run_bridge(args.session_id, args.chat_id, args.timeout, task_id=args.task_id)

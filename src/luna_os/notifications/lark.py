@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import time
 import urllib.error
@@ -16,6 +17,7 @@ from typing import Any
 from luna_os.notifications.base import NotificationProvider
 
 BASE_URL = "https://open.larksuite.com/open-apis"
+logger = logging.getLogger(__name__)
 
 
 class LarkProvider(NotificationProvider):
@@ -126,8 +128,7 @@ class LarkProvider(NotificationProvider):
 
         Pass ``restrict_messaging=False`` to allow all members to post.
         """
-        import sys
-        print(f"[create_chat] members={members}", file=sys.stderr, flush=True)
+        logger.info("create_chat: name=%s members=%s", name, members)
         data = self._api_request(
             "POST",
             "/im/v1/chats?set_bot_manager=true&user_id_type=open_id",
@@ -141,7 +142,7 @@ class LarkProvider(NotificationProvider):
             },
         )
         chat_id = data.get("chat_id", "")
-        print(f"[create_chat] created={chat_id}", file=sys.stderr, flush=True)
+        logger.info("create_chat: created chat_id=%s", chat_id)
         if chat_id and restrict_messaging:
             self.set_moderation(chat_id, "moderator_list")
         # Verify members were added
@@ -149,17 +150,18 @@ class LarkProvider(NotificationProvider):
             try:
                 info = self._api_request("GET", f"/im/v1/chats/{chat_id}")
                 user_count = info.get("user_count", 0)
-                print(f"[create_chat] user_count={user_count}", file=sys.stderr, flush=True)
+                logger.info("create_chat: user_count=%s", user_count)
                 if user_count == 0 and members:
                     # Members weren't added during creation, add them explicitly
-                    print("[create_chat] Adding members explicitly", file=sys.stderr, flush=True)
+                    logger.warning("create_chat: user_count=0, adding members explicitly")
                     self._api_request(
                         "POST",
                         f"/im/v1/chats/{chat_id}/members?member_id_type=open_id",
                         body={"id_list": members},
                     )
+                    logger.info("create_chat: members added successfully")
             except Exception as exc:
-                print(f"[create_chat] verify/add failed: {exc}", file=sys.stderr, flush=True)
+                logger.error("create_chat: verify/add failed: %s", exc, exc_info=True)
         return chat_id
 
     def set_moderation(self, chat_id: str, setting: str = "moderator_list") -> bool:
