@@ -35,6 +35,9 @@ Usage:
   luna-os intercept serve [--port 8280] [--upstream URL]
   luna-os intercept test "message text"
   luna-os intercept list-commands
+
+  luna-os watchdog run [--dry-run] [--verbose]
+  luna-os watchdog status
 """
 
 from __future__ import annotations
@@ -375,9 +378,28 @@ def main() -> None:
         from luna_os.session_overview import main as overview_main
 
         overview_main()
+    elif top == "watchdog":
+        _watchdog_cli(rest)
     else:
         print(f"Unknown command: {top}", file=sys.stderr)
         print(__doc__)
+        sys.exit(1)
+
+
+def _watchdog_cli(args: list[str]) -> None:
+    """Watchdog subcommand handler."""
+    from luna_os.watchdog.runner import run, status
+
+    if not args or args[0] in ("run", "check"):
+        dry_run = "--dry-run" in args
+        verbose = "--verbose" in args or "-v" in args
+        alerts = run(dry_run=dry_run, verbose=verbose)
+        if not alerts:
+            print("✅ All clear — no issues found")
+    elif args[0] == "status":
+        status()
+    else:
+        print(f"Usage: luna-os watchdog [run|status] [--dry-run] [--verbose]")
         sys.exit(1)
 
 
