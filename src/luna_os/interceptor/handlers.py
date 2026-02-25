@@ -402,7 +402,7 @@ async def handle_share(user_text: str, result: InterceptResult) -> dict[str, Any
         )
     
     # Call create_share_from_last_new.py
-    script_path = "/home/ubuntu/.openclaw/workspace/projects/luna-share/create_share_from_last_new.py"
+    script_path = "/home/ubuntu/repos/luna-share/create_share_from_last_new.py"
     logger.info(f"[share] Calling script with session_id: {session_id}, chat_id: {chat_id}")
     
     try:
