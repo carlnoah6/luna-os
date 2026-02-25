@@ -48,6 +48,7 @@ class InterceptorProxy:
         self.upstream = upstream.rstrip("/")
         self._handlers: dict[str, Any] = handler_registry or {}
         self._session: ClientSession | None = None
+        self._seen_events: set[str] = set()
         self._app = web.Application()
         self._app.router.add_post("/webhook/event", self._handle_event)
         self._app.router.add_post("/feishu/events", self._handle_event)
@@ -92,10 +93,22 @@ class InterceptorProxy:
 
         # Debug: log request body
         logger.debug("Request body: %s", body.decode()[:500])
+        
+        # Deduplicate events (Feishu retries if no response within 3s)
+        event_id = self._extract_event_id(body)
+        if event_id and event_id in self._seen_events:
+            logger.info("Duplicate event %s, skipping", event_id)
+            return web.json_response({})
+        if event_id:
+            self._seen_events.add(event_id)
+            # Keep set bounded (last 200 events)
+            if len(self._seen_events) > 200:
+                self._seen_events = set(list(self._seen_events)[-100:])
 
-        # Parse the Feishu event to extract user text
+        # Parse the Feishu event to extract user text and chat_id
         user_text = self._extract_text(body)
-        logger.debug("Extracted text: %r", user_text)
+        chat_id = self._extract_chat_id(body)
+        logger.debug("Extracted text: %r, chat_id: %r", user_text, chat_id)
         
         if not user_text:
             logger.debug("No text extracted, forwarding to upstream")
@@ -103,6 +116,10 @@ class InterceptorProxy:
 
         # Run matcher
         result = await self.matcher.match(user_text)
+        
+        # Attach chat_id to result for handlers that need it
+        if chat_id:
+            result.extra['chat_id'] = chat_id
 
         if result.match == MatchResult.PASSTHROUGH:
             logger.debug("Passthrough: %.40s", user_text)
@@ -187,6 +204,15 @@ class InterceptorProxy:
         except Exception:
             logger.exception("Failed to forward to %s", url)
             return web.json_response({"error": "upstream_unavailable"}, status=502)
+
+    @staticmethod
+    def _extract_event_id(body: bytes) -> str | None:
+        """Extract event_id from a Feishu event payload for deduplication."""
+        try:
+            data = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        return data.get("header", {}).get("event_id")
 
     @staticmethod
     def _extract_text(body: bytes) -> str | None:

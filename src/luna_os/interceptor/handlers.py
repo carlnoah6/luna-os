@@ -342,26 +342,85 @@ async def handle_share(user_text: str, result: InterceptResult) -> dict[str, Any
     """Create a share link for the current conversation."""
     import subprocess
     import json
+    import logging
     
-    session_id = result.session_id
-    if not session_id:
+    logger = logging.getLogger(__name__)
+    
+    # Get chat_id from result.extra
+    chat_id = result.extra.get('chat_id')
+    logger.info(f"[share] chat_id from webhook: {chat_id}")
+    
+    if not chat_id:
         return _make_card(
             "❌ 分享失败",
-            "无法获取当前 session ID",
+            "无法获取当前群聊 ID",
+            template="red",
+        )
+    
+    # Find session UUID from chat_id
+    try:
+        proc = subprocess.run(
+            ["openclaw", "sessions", "--active", "1440", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode != 0:
+            return _make_card(
+                "❌ 分享失败",
+                f"无法查询 session 列表：{proc.stderr[:200]}",
+                template="red",
+            )
+        
+        sessions_data = json.loads(proc.stdout)
+        sessions = sessions_data.get('sessions', [])
+        
+        logger.info(f"[share] Found {len(sessions)} active sessions")
+        
+        # Find session with matching chat_id in key
+        session_id = None
+        for session in sessions:
+            key = session.get('key', '')
+            if chat_id in key:
+                session_id = session.get('sessionId')
+                logger.info(f"[share] Matched session: {key} -> {session_id}")
+                break
+        
+        if not session_id:
+            logger.warning(f"[share] No session found for chat_id: {chat_id}")
+            return _make_card(
+                "❌ 分享失败",
+                f"找不到群聊 {chat_id} 对应的 session",
+                template="red",
+            )
+    except Exception as e:
+        logger.exception(f"[share] Failed to find session")
+        return _make_card(
+            "❌ 分享失败",
+            f"查询 session 失败：{str(e)[:200]}",
             template="red",
         )
     
     # Call create_share_from_last_new.py
     script_path = "/home/ubuntu/.openclaw/workspace/projects/luna-share/create_share_from_last_new.py"
+    logger.info(f"[share] Calling script with session_id: {session_id}, chat_id: {chat_id}")
+    
     try:
+        cmd = ["python3", script_path, session_id]
+        if chat_id:
+            cmd.append(chat_id)
         proc = subprocess.run(
-            ["python3", script_path, session_id],
+            cmd,
             capture_output=True,
             text=True,
             timeout=30,
         )
         
+        logger.info(f"[share] Script exit code: {proc.returncode}")
+        logger.info(f"[share] Script stdout: {proc.stdout[:500]}")
+        
         if proc.returncode != 0:
+            logger.error(f"[share] Script stderr: {proc.stderr}")
             return _make_card(
                 "❌ 分享失败",
                 f"脚本执行失败：{proc.stderr[:200]}",
@@ -375,10 +434,17 @@ async def handle_share(user_text: str, result: InterceptResult) -> dict[str, Any
                 data = json.loads(line)
                 share_url = data.get('url', '')
                 message_count = data.get('message_count', 0)
+                edit_password = data.get('edit_password', '')
+                
+                logger.info(f"[share] Created share: {share_url} ({message_count} messages)")
+                
+                body = f"🔗 {share_url}\n\n📝 包含 {message_count} 条消息"
+                if edit_password:
+                    body += f"\n\n🔑 编辑密码: {edit_password}\n（点击页面右上角 ··· 进入编辑模式）"
                 
                 return _make_card(
                     "✅ 分享链接已生成",
-                    f"🔗 {share_url}\n\n📝 包含 {message_count} 条消息",
+                    body,
                     template="green",
                 )
         
