@@ -8,10 +8,13 @@ and AgentRunner.
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
+import shutil
 import time
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from luna_os.agents.base import AgentRunner
@@ -319,6 +322,11 @@ class Planner:
             try:
                 self.notifications.send_message(chat_id, text)
                 logger.info("_notify OK: chat=%s text=%s", chat_id, text[:60])
+                # Record in sidecar for share functionality
+                try:
+                    self._write_sidecar(chat_id, "text", text=text)
+                except Exception:
+                    pass
             except Exception as exc:
                 logger.warning("Notification failed for %s: %s", chat_id, exc)
 
@@ -361,7 +369,16 @@ class Planner:
         """Send an interactive card. Returns response with message_id."""
         if self.notifications and chat_id:
             try:
-                return self.notifications.send_card(chat_id, card_data)
+                result = self.notifications.send_card(chat_id, card_data)
+                # Record card text in sidecar
+                try:
+                    # Extract readable text from card elements
+                    body = card_data.get("body", card_data.get("elements", {}))
+                    card_text = json.dumps(card_data.get("header", {}).get("title", {}).get("content", ""), ensure_ascii=False)
+                    self._write_sidecar(chat_id, "card", text=card_text.strip('"'))
+                except Exception:
+                    pass
+                return result
             except Exception as exc:
                 logger.warning("Card send failed: %s", exc)
         return {}
@@ -467,10 +484,54 @@ class Planner:
                 render_png(html, png_path)
                 image_key = self.notifications.upload_image(png_path)
                 self.notifications.send_image(target, image_key)
+                
+                # Record in sidecar for share functionality
+                try:
+                    self._write_sidecar(target, "image", png_path, plan_id=plan.id if plan else None)
+                except Exception:
+                    pass  # sidecar is best-effort
             finally:
                 shutil.rmtree(out_dir, ignore_errors=True)
         except Exception as exc:
             logger.warning("send_plan_graph failed: %s", exc)
+
+    @staticmethod
+    def _write_sidecar(
+        chat_id: str,
+        content_type: str,
+        path: str | None = None,
+        *,
+        text: str | None = None,
+        plan_id: str | None = None,
+    ) -> None:
+        """Write a sidecar record for share functionality (best-effort)."""
+        import uuid as _uuid
+        from datetime import datetime as _dt, timezone as _tz
+
+        sidecar_dir = Path.home() / ".openclaw" / "share"
+        attachments_dir = sidecar_dir / "attachments"
+        sidecar_dir.mkdir(parents=True, exist_ok=True)
+        attachments_dir.mkdir(parents=True, exist_ok=True)
+
+        # Persist image to attachments (source may be in /tmp)
+        persisted = None
+        if content_type == "image" and path and os.path.exists(path):
+            ext = Path(path).suffix or ".png"
+            att = f"sidecar_{_uuid.uuid4().hex[:12]}{ext}"
+            dest = attachments_dir / att
+            shutil.copy2(path, dest)
+            persisted = str(dest)
+
+        entry = {
+            "chat_id": chat_id,
+            "timestamp": _dt.now(_tz.utc).isoformat(),
+            "type": content_type,
+            "path": persisted or path,
+            "text": text,
+            "meta": {"source": "planner", "plan_id": plan_id},
+        }
+        with open(sidecar_dir / "sidecar.jsonl", "a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def _update_dashboard(self, trigger: str = "unknown") -> None:
         """Trigger dashboard refresh if the notification provider supports it."""
