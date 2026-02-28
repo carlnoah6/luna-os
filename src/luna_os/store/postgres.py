@@ -97,6 +97,9 @@ class PostgresBackend(StorageBackend):
     def _dict_to_step(self, d: dict[str, Any] | None) -> Step | None:
         if d is None:
             return None
+        # Handle JSONB branches field
+        if "branches" in d and isinstance(d["branches"], str):
+            d["branches"] = json.loads(d["branches"])
         return Step.from_dict(d)
 
     def _dict_to_event(self, d: dict[str, Any] | None) -> Event | None:
@@ -368,16 +371,19 @@ class PostgresBackend(StorageBackend):
         for i, s in enumerate(steps, 1):
             raw_deps = s.get("depends_on") or []
             deps = [d + 1 for d in raw_deps if d + 1 != i]  # filter self-refs
+            branches_json = json.dumps(s.get("branches", []))
             self._execute(
                 """INSERT INTO plan_steps
                    (plan_id, step_num, title, prompt, status,
-                    depends_on, timeout_minutes, model)
-                   VALUES (%s, %s, %s, %s, 'pending', %s, %s, %s)""",
+                    depends_on, timeout_minutes, model, step_type, branches, execution_count)
+                   VALUES (%s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, 0)""",
                 (
                     plan_id, i, s.get("title", ""),
                     s.get("prompt", ""), deps,
                     s.get("timeout_minutes"),
                     s.get("model"),
+                    s.get("step_type", "normal"),
+                    branches_json,
                 ),
             )
         return self.get_plan(plan_id)  # type: ignore[return-value]
@@ -598,16 +604,19 @@ class PostgresBackend(StorageBackend):
         depends_on: list[int] | None = None,
         timeout_minutes: int | None = None,
         model: str | None = None,
+        step_type: str = "normal",
+        branches: list[dict[str, Any]] | None = None,
     ) -> None:
         # Filter out self-referencing dependencies
         clean_deps = [d for d in (depends_on or []) if d != step_num]
+        branches_json = json.dumps(branches or [])
         self._execute(
             """INSERT INTO plan_steps
                (plan_id, step_num, title, prompt, status,
-                depends_on, timeout_minutes, model)
-               VALUES (%s, %s, %s, %s, 'pending', %s, %s, %s)""",
+                depends_on, timeout_minutes, model, step_type, branches, execution_count)
+               VALUES (%s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, 0)""",
             (plan_id, step_num, title, prompt, clean_deps,
-             timeout_minutes, model),
+             timeout_minutes, model, step_type, branches_json),
         )
 
     # -- Events ----------------------------------------------------------------

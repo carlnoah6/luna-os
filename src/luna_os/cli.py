@@ -329,6 +329,17 @@ def plan_cli(args: list[str]) -> None:
         elif cmd == "find-by-task":
             print_json(planner.find_by_task(args[1]))
 
+        elif cmd == "graph":
+            if len(args) < 2:
+                print("Usage: luna-os plan graph <chat_id>", file=sys.stderr)
+                sys.exit(1)
+            plan = planner.store.get_plan_by_chat(args[1])
+            if not plan:
+                print_json({"error": "Plan not found"})
+                sys.exit(1)
+            planner._send_plan_graph(plan, args[1])
+            print_json({"sent": True, "plan_id": plan.id, "chat_id": args[1]})
+
         else:
             print(f"Unknown plan command: {cmd}", file=sys.stderr)
             sys.exit(1)

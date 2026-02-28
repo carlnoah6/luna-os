@@ -292,7 +292,7 @@ phased.forEach(s => {{
 
 const nodeW = 200, gapY = 10, phaseGap = 90, labelH = 36;
 const COLS_PER_ROW = 3, svgPad = 60, wrapMargin = 90, topPad = 60;
-const arrowLineSpacing = 15, baseRowGap = 80;
+const arrowLineSpacing = 8, baseRowGap = 50;
 const graph = document.getElementById('graph');
 
 // --- Pass 1: create nodes off-screen to measure heights ---
@@ -536,132 +536,6 @@ steps.forEach(s => {{
     }});
 }});
 
-// Pre-compute all edges and sort to minimize crossings
-const allEdges = [];
-
-// Collect dependency edges
-steps.forEach(s => {{
-    s.deps.forEach(depId => {{
-        allEdges.push({{ from: depId, to: s.id, type: 'dep' }});
-    }});
-}});
-
-// Collect branch edges (only those not already in deps)
-steps.forEach(s => {{
-    if (s.is_conditional && s.branches) {{
-        s.branches.forEach(branch => {{
-            const nextSteps = branch.next_steps || [];
-            nextSteps.forEach(targetId => {{
-                const targetStep = stepMap[targetId];
-                if (targetStep && (!targetStep.deps || !targetStep.deps.includes(s.id))) {{
-                    allEdges.push({{ from: s.id, to: targetId, type: 'branch' }});
-                }}
-            }});
-        }});
-    }}
-}});
-
-// Group edges by source and target node
-const outEdges = {{}};  // nodeId -> [{{ to, targetY, targetPhase, isBackward }}]
-const inEdges = {{}};   // nodeId -> [{{ from, sourceY, sourcePhase, isBackward }}]
-
-allEdges.forEach(e => {{
-    if (!outEdges[e.from]) outEdges[e.from] = [];
-    if (!inEdges[e.to]) inEdges[e.to] = [];
-    const fromPos = nodePositions[e.from];
-    const toPos = nodePositions[e.to];
-    if (fromPos && toPos) {{
-        const isBackward = toPos.phase < fromPos.phase;
-        outEdges[e.from].push({{ 
-            to: e.to, 
-            targetY: toPos.cy, 
-            targetPhase: toPos.phase,
-            isBackward: isBackward
-        }});
-        inEdges[e.to].push({{ 
-            from: e.from, 
-            sourceY: fromPos.cy,
-            sourcePhase: fromPos.phase,
-            isBackward: isBackward
-        }});
-    }}
-}});
-
-// Sort outgoing edges to minimize crossings
-// Score: lower = top offset, higher = bottom offset
-Object.entries(outEdges).forEach(([nodeId, edges]) => {{
-    const sourcePos = nodePositions[nodeId];
-    if (!sourcePos) return;
-    const sourceRow = Math.floor(sourcePos.phase / COLS_PER_ROW);
-    
-    edges.sort((a, b) => {{
-        function getScore(e) {{
-            const targetRow = Math.floor(e.targetPhase / COLS_PER_ROW);
-            // Same-row backward (arc above): top
-            if (targetRow === sourceRow && e.isBackward) return -50;
-            // Cross-row backward (going up): top
-            if (targetRow < sourceRow) return -30;
-            // Same-row forward (going right): middle
-            if (targetRow === sourceRow && !e.isBackward) return 0;
-            // Cross-row forward (going down): bottom
-            if (targetRow > sourceRow) return 50;
-            return 0;
-        }}
-        return getScore(a) - getScore(b);
-    }});
-}});
-
-// Sort incoming edges to minimize crossings
-Object.entries(inEdges).forEach(([nodeId, edges]) => {{
-    const targetPos = nodePositions[nodeId];
-    if (!targetPos) return;
-    const targetRow = Math.floor(targetPos.phase / COLS_PER_ROW);
-    
-    edges.sort((a, b) => {{
-        function getScore(e) {{
-            const sourceRow = Math.floor(e.sourcePhase / COLS_PER_ROW);
-            // Same-row backward (arc from above, closest): top
-            if (sourceRow === targetRow && e.isBackward) return -50;
-            // Cross-row forward (from above, further): second
-            if (sourceRow < targetRow) return -30;
-            // Same-row forward (from left): middle
-            if (sourceRow === targetRow && !e.isBackward) return 0;
-            // Cross-row backward (from below): bottom
-            if (sourceRow > targetRow) return 50;
-            return 0;
-        }}
-        return getScore(a) - getScore(b);
-    }});
-}});
-
-// Build offset lookup: edgeKey -> {{ fromYOffset, toYOffset }}
-const edgeOffsets = {{}};
-const edgeSpacingGlobal = 20;
-
-Object.entries(outEdges).forEach(([nodeId, edges]) => {{
-    edges.forEach((e, idx) => {{
-        const count = edges.length;
-        const offset = count > 1 ? (idx - (count - 1) / 2) * edgeSpacingGlobal : 0;
-        const key = nodeId + '->' + e.to;
-        if (!edgeOffsets[key]) edgeOffsets[key] = {{}};
-        edgeOffsets[key].fromYOffset = offset;
-        edgeOffsets[key].fromIdx = idx;
-        edgeOffsets[key].fromCount = count;
-    }});
-}});
-
-Object.entries(inEdges).forEach(([nodeId, edges]) => {{
-    edges.forEach((e, idx) => {{
-        const count = edges.length;
-        const offset = count > 1 ? (idx - (count - 1) / 2) * edgeSpacingGlobal : 0;
-        const key = e.from + '->' + nodeId;
-        if (!edgeOffsets[key]) edgeOffsets[key] = {{}};
-        edgeOffsets[key].toYOffset = offset;
-        edgeOffsets[key].toIdx = idx;
-        edgeOffsets[key].toCount = count;
-    }});
-}});
-
 let bypassAboveIdx = 0, bypassBelowIdx = 0;
 
 steps.forEach(s => {{
@@ -669,20 +543,14 @@ steps.forEach(s => {{
         const from = nodePositions[depId];
         const to = nodePositions[s.id];
         if (!from || !to) return;
-        
-        // Get pre-computed Y offsets (sorted to minimize crossings)
-        const edgeKey = depId + '->' + s.id;
-        const offsets = edgeOffsets[edgeKey] || {{}};
-        const fromYOffset = offsets.fromYOffset || 0;
-        const toYOffset = offsets.toYOffset || 0;
         const depStep = stepMap[depId];
         const isDone = depStep && depStep.status === 'done';
         
-        // Check if this dependency edge is also a branch edge (from conditional node)
-        // If so, add the branch label
+        // Check if this edge is from a conditional node
         let branchLabel = '';
         let isSelectedBranch = false;
         if (depStep && depStep.is_conditional && depStep.branches) {{
+            // Find which branch this edge belongs to
             for (const branch of depStep.branches) {{
                 if (branch.next_steps && branch.next_steps.includes(s.id)) {{
                     branchLabel = branch.name;
@@ -692,59 +560,31 @@ steps.forEach(s => {{
             }}
         }}
         
-        // Check if target step is skipped
-        const isTargetSkipped = s.status === 'skipped';
+        // Style based on branch selection
+        let strokeColor = isDone ? '#4CAF50' : '#ddd';
+        let strokeWidth = isDone ? '2' : '1.5';
+        let strokeDasharray = '';
         
-        // Style based on branch selection and target status
-        // Default colors (but check skipped first)
-        let strokeColor, strokeWidth, strokeDasharray;
-        
-        if (isTargetSkipped) {{
-            // Target is skipped: always gray, regardless of source status
-            console.log(`Edge to step ${{s.id}} (skipped): setting gray`);
-            strokeColor = '#ccc';
-            strokeWidth = '1.5';
-            strokeDasharray = '4,4';
-        }} else if (branchLabel) {{
-            console.log(`Edge to step ${{s.id}}: branchLabel=${{branchLabel}}, isSelectedBranch=${{isSelectedBranch}}`);
-            strokeDasharray = '';
+        if (branchLabel) {{
             if (isSelectedBranch) {{
-                // Selected branch: solid, normal width
+                // Selected branch: solid, thicker
                 strokeColor = isDone ? '#4CAF50' : '#2196F3';
-                strokeWidth = '1.5';
+                strokeWidth = '2.5';
             }} else if (depStep.selected_branch) {{
                 // Not selected branch: dashed, gray
                 strokeColor = '#ccc';
                 strokeWidth = '1.5';
                 strokeDasharray = '4,4';
             }} else {{
-                // Branch not yet selected: dashed, gray (not orange)
-                strokeColor = '#ccc';
-                strokeWidth = '1.5';
+                // Branch not yet selected: dashed with question mark
+                strokeColor = '#FF9800';
+                strokeWidth = '2';
                 strokeDasharray = '6,3';
-            }}
-        }} else {{
-            // No branch label and not skipped: use default colors
-            // BUT: if source is conditional and not yet selected, use dashed style
-            if (depStep && depStep.is_conditional && !depStep.selected_branch) {{
-                strokeColor = '#ccc';
-                strokeWidth = '1.5';
-                strokeDasharray = '6,3';
-            }} else {{
-                strokeColor = isDone ? '#4CAF50' : '#ddd';
-                strokeWidth = isDone ? '2' : '1.5';
-                strokeDasharray = '';
             }}
         }}
         
-        // IMPORTANT: SVG arrows have TWO parts that need color coordination:
-        // 1. Path stroke (set above via strokeColor)
-        // 2. Arrowhead marker (set here via markerEnd)
-        // Both must match for consistent arrow appearance!
-        // Choose arrowhead color based on target status and source status
-        const markerEnd = isTargetSkipped 
-            ? 'url(#arrowhead)'  // Gray arrowhead for skipped targets
-            : (isDone ? 'url(#arrowhead-done)' : 'url(#arrowhead)');
+        const markerEnd = isDone
+            ? 'url(#arrowhead-done)' : 'url(#arrowhead)';
         const path = document.createElementNS(
             'http://www.w3.org/2000/svg', 'path'
         );
@@ -760,21 +600,13 @@ steps.forEach(s => {{
                 n.phase > fromPhase && n.phase < toPhase
                 && Math.floor(n.phase / COLS_PER_ROW) === fromRow
             );
-            const x1 = from.cx + 2, y1 = from.cy + fromYOffset;
-            const x2 = to.lx - 2, y2 = to.ly + toYOffset;
+            const x1 = from.cx + 2, y1 = from.cy;
+            const x2 = to.lx - 2, y2 = to.ly;
             if (intermediateNodes.length === 0) {{
-                // Use straight line if nodes are at the same height
-                // Force same Y coordinate for horizontal line
-                if (Math.abs(from.cy - to.cy) < 1 && fromYOffset === 0 && toYOffset === 0) {{
-                    const midY = (from.cy + to.cy) / 2;
-                    path.setAttribute('d', `M${{x1}},${{midY}} L${{x2}},${{midY}}`);
-                }} else {{
-                    // Different heights: use curve
-                    const midX = (x1 + x2) / 2;
-                    path.setAttribute('d',
-                        `M${{x1}},${{y1}} C${{midX}},${{y1}} `
-                        + `${{midX}},${{y2}} ${{x2}},${{y2}}`);
-                }}
+                const midX = (x1 + x2) / 2;
+                path.setAttribute('d',
+                    `M${{x1}},${{y1}} C${{midX}},${{y1}} `
+                    + `${{midX}},${{y2}} ${{x2}},${{y2}}`);
             }} else {{
                 const bypassSpacing = 18;
                 const rCenter = (from.top + to.bottom) / 2;
@@ -802,39 +634,28 @@ steps.forEach(s => {{
                 }}
             }}
         }} else {{
-            const x1 = from.cx + 2, y1 = from.cy + fromYOffset;
-            const x2 = to.lx - 2, y2 = to.ly + toYOffset;
+            const x1 = from.cx + 2, y1 = from.cy;
+            const x2 = to.lx - 2, y2 = to.ly;
             // Cross-row: drop down right after source node, travel horizontally
             // in the gap between rows, then rise up to target node
-            const isForward = toRow > fromRow;
-            const gapKey = Math.min(fromRow, toRow) + '-' + Math.max(fromRow, toRow);
-            const dirKey = gapKey + (isForward ? '-fwd' : '-bwd');
-            if (!crossRowArrowIdx[dirKey]) crossRowArrowIdx[dirKey] = 0;
-            const idx = crossRowArrowIdx[dirKey];
-            crossRowArrowIdx[dirKey]++;
+            const gapKey = fromRow + '-' + toRow;
+            if (!crossRowArrowIdx[gapKey]) crossRowArrowIdx[gapKey] = 0;
+            const idx = crossRowArrowIdx[gapKey];
+            crossRowArrowIdx[gapKey]++;
             const vOffset = idx * arrowLineSpacing;
             // Find the gap between rows for horizontal segment
             const fromRowBottom = rowY[fromRow] + rowMaxH[fromRow];
             const toRowTop = rowY[toRow];
-            const gapHeight = toRowTop - fromRowBottom;
-            // Forward arrows in upper half, backward arrows in lower half
-            const gapMid = isForward 
-                ? fromRowBottom + gapHeight * 0.25 + vOffset
-                : fromRowBottom + gapHeight * 0.75 + vOffset;
-            // Use both outIdx and crossRowIdx for proper spacing
-            const edgeOff = edgeOffsets[depId + '->' + s.id] || {{}};
-            const outIdx = edgeOff.fromIdx || 0;
-            const inIdx = edgeOff.toIdx || 0;
-            const xSpacing = 15;
-            const baseOffset = 30;
-            
-            // fromX: combine outIdx (per-node) and idx (per-gap) to avoid overlapping
-            const fromX = x1 + baseOffset + (outIdx * xSpacing) + (idx * xSpacing);
-            // toX: based on target node's incoming edge index
-            const toX = x2 - baseOffset - inIdx * xSpacing;
-            
+            // Place horizontal segments evenly in the gap
+            const gapStart = fromRowBottom + (toRowTop - fromRowBottom) * 0.3;
+            const gapMid = gapStart + vOffset;
+            // Drop down right after source node (x1 + small margin)
+            const dropX = x1 + 10 + vOffset;
+            // Rise up just before target node
+            const riseX = x2 - 15 - vOffset;
             path.setAttribute('d',
-                `M${{x1}},${{y1}} H${{fromX}} V${{gapMid}} H${{toX}} V${{y2}} H${{x2}}`);
+                `M${{x1}},${{y1}} H${{dropX}} `
+                + `V${{gapMid}} H${{riseX}} V${{y2}} H${{x2}}`);
         }}
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke', strokeColor);
@@ -846,223 +667,27 @@ steps.forEach(s => {{
         svg.appendChild(path);
         
         // Add branch label if this is a conditional edge
-
+        if (branchLabel) {{
+            const labelText = document.createElementNS(
+                'http://www.w3.org/2000/svg', 'text'
+            );
+            const midX = (from.cx + to.lx) / 2;
+            const midY = (from.cy + to.ly) / 2;
+            labelText.setAttribute('x', midX);
+            labelText.setAttribute('y', midY - 5);
+            labelText.setAttribute('text-anchor', 'middle');
+            labelText.setAttribute('font-size', '10');
+            labelText.setAttribute('font-weight', '600');
+            labelText.setAttribute('fill', isSelectedBranch ? '#2196F3' : '#999');
+            labelText.textContent = isSelectedBranch 
+                ? branchLabel 
+                : (depStep.selected_branch ? '' : branchLabel + '?');
+            svg.appendChild(labelText);
+        }}
     }});
 }});
 
-// Draw conditional branch arrows (for branches not covered by deps)
-steps.forEach(s => {{
-    if (s.is_conditional && s.branches) {{
-        s.branches.forEach(branch => {{
-            const branchName = branch.name;
-            const nextSteps = branch.next_steps || [];
-            const isSelectedBranch = s.selected_branch === branchName;
-            
-            nextSteps.forEach(targetId => {{
-                const targetStep = stepMap[targetId];
-                if (!targetStep) return;
-                
-                // Skip if this edge is already drawn via deps
-                if (targetStep.deps && targetStep.deps.includes(s.id)) return;
-                
-                const from = nodePositions[s.id];
-                const to = nodePositions[targetId];
-                if (!from || !to) return;
-                
-                // Get pre-computed Y offsets (sorted to minimize crossings)
-                const edgeKey = s.id + '->' + targetId;
-                const offsets = edgeOffsets[edgeKey] || {{}};
-                const fromYOffset = offsets.fromYOffset || 0;
-                const toYOffset = offsets.toYOffset || 0;
-                
-                const isDone = s.status === 'done';
-                const isTargetSkipped = targetStep.status === 'skipped';
-                
-                // Style for branch arrows
-                let strokeColor, strokeWidth, strokeDasharray;
-                
-                if (isTargetSkipped) {{
-                    strokeColor = '#ccc';
-                    strokeWidth = '1.5';
-                    strokeDasharray = '4,4';
-                }} else if (isSelectedBranch) {{
-                    strokeColor = isDone ? '#4CAF50' : '#2196F3';
-                    strokeWidth = '1.5';
-                    strokeDasharray = '';
-                }} else if (s.selected_branch) {{
-                    // Not selected branch
-                    strokeColor = '#ccc';
-                    strokeWidth = '1.5';
-                    strokeDasharray = '4,4';
-                }} else {{
-                    // Branch not yet selected
-                    strokeColor = '#ccc';
-                    strokeWidth = '1.5';
-                    strokeDasharray = '6,3';
-                }}
-                
-                const markerEnd = isTargetSkipped 
-                    ? 'url(#arrowhead)'
-                    : (isDone ? 'url(#arrowhead-done)' : 'url(#arrowhead)');
-                
-                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                const fromPhase = from.phase;
-                const toPhase = to.phase;
-                const fromRow = fromPhase >= 0 ? Math.floor(fromPhase / COLS_PER_ROW) : -1;
-                const toRow = toPhase >= 0 ? Math.floor(toPhase / COLS_PER_ROW) : -1;
-
-                if (fromRow === toRow && fromRow >= 0) {{
-                    const x1 = from.cx + 2, y1 = from.cy + fromYOffset;
-                    const x2 = to.lx - 2, y2 = to.ly + toYOffset;
-                    
-                    // Check if this is a backward arrow (loop)
-                    const isBackward = toPhase < fromPhase;
-                    
-                    if (isBackward) {{
-                        // Backward arrow: polyline (horizontal + vertical segments)
-                        const minTop = Math.min(from.top, to.top);
-                        const arcY = minTop - 60 - bypassAboveIdx * 18;
-                        bypassAboveIdx++;
-                        
-                        // Use outIdx and inIdx for consistent channel allocation
-                        const edgeOff = edgeOffsets[s.id + '->' + targetId] || {{}};
-                        const outIdx = edgeOff.fromIdx || 0;
-                        const inIdx = edgeOff.toIdx || 0;
-                        const xSpacing = 15;
-                        const rightExtend = 30 + outIdx * xSpacing;
-                        const leftExtend = 30 + inIdx * xSpacing;
-                        
-                        // Polyline path: right → up → left → down
-                        path.setAttribute('d',
-                            `M${{x1}},${{y1}} ` +
-                            `H${{x1 + Math.abs(rightExtend)}} ` +
-                            `V${{arcY}} ` +
-                            `H${{x2 - Math.abs(leftExtend)}} ` +
-                            `V${{y2}} ` +
-                            `H${{x2}}`
-                        );
-                    }} else {{
-                        // Forward arrow: use existing logic
-                        const intermediateNodes = allNodeBoxes.filter(n =>
-                            n.phase > fromPhase && n.phase < toPhase &&
-                            Math.floor(n.phase / COLS_PER_ROW) === fromRow
-                        );
-                        
-                        if (intermediateNodes.length === 0) {{
-                            const midX = (x1 + x2) / 2;
-                            path.setAttribute('d',
-                                `M${{x1}},${{y1}} C${{midX}},${{y1}} `
-                                + `${{midX}},${{y2}} ${{x2}},${{y2}}`);
-                        }} else {{
-                            const bypassSpacing = 18;
-                            const rCenter = (from.top + to.bottom) / 2;
-                            const avgY = (from.cy + to.ly) / 2;
-                            if (avgY <= rCenter) {{
-                                const minTop = Math.min(...intermediateNodes.map(n => n.top));
-                                const arcY = minTop - 35 - bypassAboveIdx * bypassSpacing;
-                                bypassAboveIdx++;
-                                path.setAttribute('d',
-                                    `M${{x1}},${{y1}} C${{x1}},${{arcY}} `
-                                    + `${{x2}},${{arcY}} ${{x2}},${{y2}}`);
-                            }} else {{
-                                const maxBot = Math.max(...intermediateNodes.map(n => n.bottom));
-                                const arcY = maxBot + 35 + bypassBelowIdx * bypassSpacing;
-                                bypassBelowIdx++;
-                                path.setAttribute('d',
-                                    `M${{x1}},${{y1}} C${{x1}},${{arcY}} `
-                                    + `${{x2}},${{arcY}} ${{x2}},${{y2}}`);
-                            }}
-                        }}
-                    }}
-                }} else {{
-                    const x1 = from.cx + 2, y1 = from.cy + fromYOffset;
-                    const x2 = to.lx - 2, y2 = to.ly + toYOffset;
-                    const isForward = toRow > fromRow;
-                    const gapKey = Math.min(fromRow, toRow) + '-' + Math.max(fromRow, toRow);
-                    const dirKey = gapKey + (isForward ? '-fwd' : '-bwd');
-                    if (!crossRowArrowIdx[dirKey]) crossRowArrowIdx[dirKey] = 0;
-                    const idx = crossRowArrowIdx[dirKey];
-                    crossRowArrowIdx[dirKey]++;
-                    const vOffset = idx * arrowLineSpacing;
-                    const fromRowBottom = rowY[fromRow] + rowMaxH[fromRow];
-                    const toRowTop = rowY[toRow];
-                    const gapHeight = toRowTop - fromRowBottom;
-                    // Forward arrows in upper half, backward arrows in lower half
-                    const gapMid = isForward 
-                        ? fromRowBottom + gapHeight * 0.3 + vOffset
-                        : fromRowBottom + gapHeight * 0.7 + vOffset;
-                    // Use both outIdx and crossRowIdx for proper spacing
-                    const edgeOff = edgeOffsets[s.id + '->' + targetId] || {{}};
-                    const outIdx = edgeOff.fromIdx || 0;
-                    const inIdx = edgeOff.toIdx || 0;
-                    const xSpacing = 15;
-                    const baseOffset = 30;
-                    
-                    const fromX = x1 + baseOffset + (outIdx * xSpacing) + (idx * xSpacing);
-                    const toX = x2 - baseOffset - inIdx * xSpacing;
-                    
-                    path.setAttribute('d',
-                        `M${{x1}},${{y1}} H${{fromX}} V${{gapMid}} H${{toX}} V${{y2}} H${{x2}}`);
-                }}
-                
-                path.setAttribute('fill', 'none');
-                path.setAttribute('stroke', strokeColor);
-                path.setAttribute('stroke-width', strokeWidth);
-                if (strokeDasharray) {{
-                    path.setAttribute('stroke-dasharray', strokeDasharray);
-                }}
-                path.setAttribute('marker-end', markerEnd);
-                svg.appendChild(path);
-                
-
-            }});
-        }});
-    }}
-}});
-
 graph.insertBefore(svg, graph.firstChild);
-
-// Add branch labels inside conditional nodes, aligned with outgoing edges
-// Create a separate SVG layer on top for labels
-const labelSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-labelSvg.setAttribute('class', 'branch-labels');
-labelSvg.setAttribute('width', totalW + wrapMargin + svgPad);
-labelSvg.setAttribute('height', totalH + svgPad + topPad);
-labelSvg.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;';
-
-steps.forEach(s => {{
-    if (s.is_conditional && s.branches) {{
-        const pos = nodePositions[s.id];
-        if (!pos) return;
-        
-        s.branches.forEach(branch => {{
-            const branchName = branch.name;
-            const nextSteps = branch.next_steps || [];
-            const isSelected = s.selected_branch === branchName;
-            
-            nextSteps.forEach(targetId => {{
-                const edgeKey = s.id + '->' + targetId;
-                const offsets = edgeOffsets[edgeKey] || {{}};
-                const yOffset = offsets.fromYOffset || 0;
-                
-                const labelText = document.createElementNS(
-                    'http://www.w3.org/2000/svg', 'text'
-                );
-                // Position inside the node, at the right edge, aligned with outgoing edge
-                labelText.setAttribute('x', pos.cx - 8);
-                labelText.setAttribute('y', pos.cy + yOffset + 4);
-                labelText.setAttribute('text-anchor', 'end');
-                labelText.setAttribute('font-size', '10');
-                labelText.setAttribute('font-weight', '700');
-                labelText.setAttribute('fill', isSelected ? '#2196F3' : '#666');
-                labelText.textContent = branchName;
-                labelSvg.appendChild(labelText);
-            }});
-        }});
-    }}
-}});
-
-graph.appendChild(labelSvg);
 </script>
 </body>
 </html>"""
@@ -1088,12 +713,6 @@ def render_png(html_content: str, output_path: str) -> str:
             )
             page.goto(f"file://{html_file}")
             page.wait_for_timeout(300)
-            # Wait for SVG to be fully rendered
-            page.wait_for_selector('svg.arrows', state='attached')
-            page.wait_for_timeout(500)
-            # Force a repaint
-            page.evaluate("() => { document.body.offsetHeight; }")
-            page.wait_for_timeout(200)
             dims = page.evaluate(
                 "() => { const g = document.getElementById('graph');"
                 " const c = document.querySelector('.container');"

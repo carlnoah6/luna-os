@@ -165,28 +165,6 @@ class ContractHelper:
             payload={"result": result, "succeeded": succeeded, "failed": failed},
         )
 
-    def done_with_branch(self, result: str, branch: str, succeeded: int = 0, failed: int = 0) -> None:
-        """Emit ``contract.done`` event with branch selection for conditional nodes.
-        
-        Args:
-            result: Result description
-            branch: Name of the branch to activate
-            succeeded: Number of successful operations (optional)
-            failed: Number of failed operations (optional)
-        """
-        self._update_task_cost()
-        self.store.emit_event(
-            "contract.done",
-            task_id=self.task_id,
-            step_num=self.step_id,
-            payload={
-                "result": result,
-                "succeeded": succeeded,
-                "failed": failed,
-                "selected_branch": branch,
-            },
-        )
-
     def partial(self, result: str, succeeded: int = 0, failed: int = 0) -> None:
         """Emit ``contract.partial`` event. Planner treats as failure."""
         self.store.emit_event(
@@ -204,24 +182,6 @@ class ContractHelper:
             task_id=self.task_id,
             step_num=self.step_id,
             payload={"error": error},
-        )
-
-
-    def replan(self, new_steps: list[dict[str, Any]], append: bool = False) -> None:
-        """Emit ``contract.replan`` event. Planner will replace/append pending steps.
-        
-        Args:
-            new_steps: List of step dicts with title, prompt, depends_on, etc.
-            append: If True, append to existing pending steps; if False, replace them.
-        """
-        self.store.emit_event(
-            "contract.replan",
-            task_id=self.task_id,
-            step_num=self.step_id,
-            payload={
-                "new_steps": new_steps,
-                "append": append,
-            },
         )
 
     def _update_task_cost(self) -> None:
@@ -302,12 +262,6 @@ def _process_single_event(
 
     if etype in ("step.done", "contract.done") and plan_id and step_num is not None:
         result = payload.get("result", "completed")
-        selected_branch = payload.get("selected_branch")
-        
-        # If this is a conditional node with branch selection, update the step
-        if selected_branch:
-            store.update_step(plan_id, step_num, selected_branch=selected_branch)
-        
         plan = store.get_plan(plan_id)
         if plan and on_step_done:
             on_step_done(plan, step_num, result)

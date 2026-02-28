@@ -39,6 +39,7 @@ class StepStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     WAITING = "waiting"
+    SKIPPED = "skipped"  # For branches not taken
 
 
 class Priority(StrEnum):
@@ -137,6 +138,11 @@ class Step:
     model: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    # Conditional node fields
+    step_type: str = "normal"  # "normal" or "conditional"
+    branches: list[dict[str, Any]] = field(default_factory=list)  # Branch definitions
+    selected_branch: str | None = None  # Selected branch name
+    execution_count: int = 0  # For loop detection
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {}

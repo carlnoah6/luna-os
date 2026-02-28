@@ -272,19 +272,33 @@ async def handle_timeline(user_text: str, result: InterceptResult) -> dict[str, 
 async def handle_status(user_text: str, result: InterceptResult) -> dict[str, Any]:
     """Show system status."""
     try:
-        sessions = _get_sessions(5)
-        model = "unknown"
-        context = "?"
+        sessions = _get_sessions(60)
+        chat_id = result.extra.get("chat_id", "")
+
+        # Find the session matching this chat
+        target_session = None
         for s in sessions:
             if not isinstance(s, dict):
                 continue
-            if s.get("model"):
-                model = s["model"]
-            ctx = s.get("totalTokens", 0) or 0
-            max_ctx = s.get("contextTokens", 128000) or 128000
+            key = s.get("key", "")
+            if chat_id and chat_id in key:
+                target_session = s
+                break
+        # Fallback: first session with tokens
+        if not target_session:
+            for s in sessions:
+                if isinstance(s, dict) and s.get("totalTokens"):
+                    target_session = s
+                    break
+
+        model = "unknown"
+        context = "?"
+        if target_session:
+            model = target_session.get("model", "unknown")
+            ctx = target_session.get("totalTokens", 0) or 0
+            max_ctx = target_session.get("contextTokens", 128000) or 128000
             if ctx > 0:
                 context = f"{ctx // 1000}k / {max_ctx // 1000}k ({ctx * 100 // max_ctx}%)"
-                break
 
         # Task counts
         rc, stdout, _ = _run_cmd("luna-os", "task", "status")
@@ -299,7 +313,7 @@ async def handle_status(user_text: str, result: InterceptResult) -> dict[str, An
 - 模型：`{model}`
 - 上下文：{context}
 - 任务：{task_info}
-- Session 数：{len(sessions)} 个（5 分钟内活跃）"""
+- Session 数：{len(sessions)} 个（60 分钟内活跃）"""
 
         return _make_card("📊 系统状态", content)
     except Exception as e:

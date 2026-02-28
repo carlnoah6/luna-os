@@ -91,10 +91,6 @@ def normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
         result["timeout_minutes"] = raw["timeout_minutes"]
     if "model" in raw:
         result["model"] = raw["model"]
-    if "step_type" in raw:
-        result["step_type"] = raw["step_type"]
-    if "branches" in raw:
-        result["branches"] = raw["branches"]
 
     return result
 
@@ -203,12 +199,7 @@ def format_plan(plan: Plan) -> str:
             dur = _format_duration(s.started_at, s.completed_at)
             dur_str = f" [{dur}]" if dur else ""
             result = _short_desc(s.result or "", 60)
-            # Show conditional node indicator and selected branch
-            node_type = ""
-            if s.step_type == "conditional":
-                branch_info = f" → {s.selected_branch}" if s.selected_branch else ""
-                node_type = f" 🔀{branch_info}"
-            lines.append(f"  [done] {num}. {title}{node_type} {s.task_id or ''}{dur_str} -- {result}")
+            lines.append(f"  [done] {num}. {title} {s.task_id or ''}{dur_str} -- {result}")
         elif st == "running":
             dur = _format_duration(s.started_at)
             dur_str = f" [{dur}]" if dur else ""
@@ -223,14 +214,10 @@ def format_plan(plan: Plan) -> str:
             lines.append(f"  [⏸️ waiting] {num}. {title} {s.task_id or ''}{dur_str} -- {reason}")
         elif st == "cancelled":
             lines.append(f"  [cancelled] {num}. {title}")
-        elif st == "skipped":
-            lines.append(f"  [skipped] {num}. {title} (branch not taken)")
         else:
             deps = s.depends_on or []
             dep_str = f" (after {','.join(str(d) for d in deps)})" if deps else ""
-            # Show conditional node indicator for pending conditional nodes
-            node_type = " 🔀" if s.step_type == "conditional" else ""
-            lines.append(f"  [pending] {num}. {title}{node_type}{dep_str}")
+            lines.append(f"  [pending] {num}. {title}{dep_str}")
 
     return "\n".join(lines)
 
@@ -346,15 +333,18 @@ class Planner:
     def _notify_main_session(
         self, plan: Plan, event: str, detail: str = "",
     ) -> None:
-        """Send notification to the plan's chat via Feishu API with @Luna mention.
+        """Send a system event to the main OpenClaw session on plan state changes.
 
-        Sends a message through Feishu API that mentions the Luna bot,
-        which will appear as a notification to users.
+        Uses ``openclaw system event`` CLI to inject a message into the
+        main conversation session so the user gets real-time plan updates.
 
         Events: step_started, step_done, step_failed, plan_completed,
                 plan_stuck, plan_started
         """
-        if not self.notifications:
+        import shutil
+        import subprocess
+
+        if not shutil.which("openclaw"):
             return
 
         goal = (plan.goal or "")[:60]
@@ -363,11 +353,18 @@ class Planner:
             text += f"\n{detail}"
 
         try:
-            # Send via Feishu API (will appear as notification but won't trigger Luna)
-            self.notifications.send_message(plan.chat_id, text)
-            logger.info("Plan notification sent to %s", plan.chat_id)
+            subprocess.run(
+                [
+                    "openclaw", "system", "event",
+                    "--text", text,
+                    "--mode", "now",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
         except Exception as exc:
-            logger.warning("Plan notification failed: %s", exc)
+            logger.warning("Main session notification failed: %s", exc)
+
     def _send_card(self, chat_id: str, card_data: dict[str, Any]) -> dict[str, Any]:
         """Send an interactive card. Returns response with message_id."""
         if self.notifications and chat_id:
@@ -1055,11 +1052,6 @@ Report results to: {chat_id}
 
         self.store.complete_step(plan.id, step_num, result)
         
-        # Handle conditional node branch selection
-        step = self.store.get_step(plan.id, step_num)
-        if step and step.step_type == "conditional" and step.selected_branch:
-            self._handle_branch_selection(plan.id, step)
-        
         # Log step completion
         step = self.store.get_step(plan.id, step_num)
         if step:
@@ -1306,8 +1298,6 @@ Report results to: {chat_id}
                 plan.id, step_num, ns["title"], ns["prompt"], deps,
                 timeout_minutes=ns.get("timeout_minutes"),
                 model=ns.get("model"),
-                step_type=ns.get("step_type", "normal"),
-                branches=ns.get("branches"),
             )
 
         # Auto-advance if plan is active
@@ -1506,9 +1496,6 @@ Report results to: {chat_id}
             on_step_waiting=lambda plan, step_num, question: self.step_waiting(
                 plan.chat_id, step_num, question
             ),
-            on_replan=lambda plan, new_steps, append: self.replan(
-                plan.chat_id, new_steps, append
-            ),
         )
 
         # Check for expired drafts
@@ -1685,114 +1672,6 @@ Report results to: {chat_id}
                     stuck_count += 1
 
         return stuck_count
-
-
-    def _handle_branch_selection(self, plan_id: str, step: Step) -> None:
-        """Handle conditional node branch selection.
-        
-        When a conditional node completes with a branch selection:
-        1. Find the selected branch definition
-        2. Activate steps in the selected branch
-        3. Skip (mark as skipped) steps in other branches
-        4. Handle loops (if branch points back to earlier step)
-        """
-        if not step.branches or not step.selected_branch:
-            return
-        
-        # Find the selected branch
-        selected = None
-        other_branches = []
-        for branch in step.branches:
-            if branch.get("name") == step.selected_branch:
-                selected = branch
-            else:
-                other_branches.append(branch)
-        
-        if not selected:
-            logger.warning(
-                "Branch '%s' not found in step %d branches: %s",
-                step.selected_branch, step.step_num, [b.get("name") for b in step.branches]
-            )
-            return
-        
-        # Get next steps for selected branch
-        next_steps = selected.get("next_steps", [])
-        
-        # Collect all steps from other branches
-        other_steps = set()
-        for branch in other_branches:
-            other_steps.update(branch.get("next_steps", []))
-        
-        # Skip steps that are only in other branches (not in selected branch)
-        skip_steps = other_steps - set(next_steps)
-        logger.info(
-            "Branch selection: selected='%s', next_steps=%s, other_steps=%s, skip_steps=%s",
-            step.selected_branch, next_steps, other_steps, skip_steps
-        )
-        for step_num in skip_steps:
-            existing = self.store.get_step(plan_id, step_num)
-            if existing and existing.status.value == "pending":
-                self.store.update_step(plan_id, step_num, status="skipped")
-                logger.info(
-                    "Skipped step %d (not in selected branch '%s')",
-                    step_num, step.selected_branch
-                )
-        
-        # Handle loops: if next_steps contains a step number <= current step
-        for next_step_num in next_steps:
-            if next_step_num <= step.step_num:
-                # This is a loop - increment execution count
-                existing = self.store.get_step(plan_id, next_step_num)
-                if existing:
-                    new_count = existing.execution_count + 1
-                    max_loops = 10  # Safety limit
-                    if new_count > max_loops:
-                        logger.warning(
-                            "Loop limit reached for step %d (executed %d times)",
-                            next_step_num, new_count
-                        )
-                        self.store.update_step(plan_id, next_step_num, status="cancelled")
-                        self._notify(
-                            step.plan_id,
-                            f"⚠️ Loop limit reached for step {next_step_num} "
-                            f"(executed {new_count} times). Stopping loop."
-                        )
-                    else:
-                        # Reset the step to pending so it can run again
-                        self.store.update_step(
-                            plan_id, next_step_num,
-                            status="pending",
-                            task_id=None,
-                            result=None,
-                            started_at=None,
-                            completed_at=None,
-                            execution_count=new_count,
-                            selected_branch=None
-                        )
-                        logger.info(
-                            "Loop: reset step %d to pending (execution #%d)",
-                            next_step_num, new_count
-                        )
-                        
-                        # Also reset all steps that depend on this step
-                        # (they were skipped in previous iteration)
-                        plan = self.store.get_plan(plan_id)
-                        if plan:
-                            for s in plan.steps:
-                                if next_step_num in (s.depends_on or []):
-                                    if s.status.value in ("skipped", "cancelled"):
-                                        self.store.update_step(
-                                            plan_id, s.step_num,
-                                            status="pending",
-                                            task_id=None,
-                                            result=None,
-                                            started_at=None,
-                                            completed_at=None
-                                        )
-                                        logger.info(
-                                            "Loop: reset dependent step %d to pending",
-                                            s.step_num
-                                        )
 
     def list_plans(self) -> list[dict[str, Any]]:
         """List all plans."""
