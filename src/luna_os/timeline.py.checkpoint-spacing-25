@@ -618,15 +618,8 @@ Object.entries(inEdges).forEach(([nodeId, edges]) => {{
     const targetRow = Math.floor(targetPos.phase / COLS_PER_ROW);
     
     edges.sort((a, b) => {{
-        const sourcePosA = nodePositions[a.from];
-        const sourcePosB = nodePositions[b.from];
-        if (!sourcePosA || !sourcePosB) return 0;
-        
-        const sourceRowA = Math.floor(a.sourcePhase / COLS_PER_ROW);
-        const sourceRowB = Math.floor(b.sourcePhase / COLS_PER_ROW);
-        
-        // First, sort by row priority
-        function getRowScore(e, sourceRow) {{
+        function getScore(e) {{
+            const sourceRow = Math.floor(e.sourcePhase / COLS_PER_ROW);
             // Same-row backward (arc from above, closest): top
             if (sourceRow === targetRow && e.isBackward) return -50;
             // Cross-row forward (from above, further): second
@@ -637,15 +630,7 @@ Object.entries(inEdges).forEach(([nodeId, edges]) => {{
             if (sourceRow > targetRow) return 50;
             return 0;
         }}
-        
-        const scoreA = getRowScore(a, sourceRowA);
-        const scoreB = getRowScore(b, sourceRowB);
-        
-        // If row scores are different, use row score
-        if (scoreA !== scoreB) return scoreA - scoreB;
-        
-        // If row scores are the same, sort by source Y coordinate
-        return sourcePosA.cy - sourcePosB.cy;
+        return getScore(a) - getScore(b);
     }});
 }});
 
@@ -1629,51 +1614,6 @@ def render_png(html_content: str, output_path: str) -> str:
             # Force a repaint
             page.evaluate("() => { document.body.offsetHeight; }")
             page.wait_for_timeout(200)
-            
-            # 提取所有边的路径数据
-            edge_paths = page.evaluate("""() => {
-                const paths = document.querySelectorAll('svg.arrows path');
-                return Array.from(paths).map((p, i) => ({
-                    id: i,
-                    d: p.getAttribute('d')
-                }));
-            }""")
-            
-            if edge_paths:
-                import json
-                with open("/tmp/edge_paths.json", "w") as f:
-                    json.dump(edge_paths, f, indent=2)
-                print(f"边的路径数据已保存到 /tmp/edge_paths.json ({len(edge_paths)} 条边)")
-                
-                # 运行交叉检测脚本
-                import subprocess
-                subprocess.run(["python3", "/home/ubuntu/.openclaw/workspace/find_crossings.py"], 
-                             capture_output=True, text=True)
-                
-                # 读取交叉点数据并在页面上画圆圈
-                try:
-                    with open("/tmp/crossings.json", "r") as f:
-                        crossings = json.load(f)
-                    
-                    if crossings:
-                        # 在页面上画红色圆圈标记交叉点
-                        page.evaluate("""(crossings) => {
-                            const svg = document.querySelector('svg.arrows');
-                            crossings.forEach((c, i) => {
-                                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                                circle.setAttribute('cx', c.x);
-                                circle.setAttribute('cy', c.y);
-                                circle.setAttribute('r', '8');
-                                circle.setAttribute('fill', 'rgba(255, 150, 150, 0.3)');
-                                circle.setAttribute('stroke', 'rgba(255, 100, 100, 0.5)');
-                                circle.setAttribute('stroke-width', '2');
-                                svg.appendChild(circle);
-                            });
-                        }""", crossings)
-                        print(f"已在图片上标记 {len(crossings)} 个交叉点")
-                except:
-                    pass
-            
             dims = page.evaluate(
                 "() => { const g = document.getElementById('graph');"
                 " const c = document.querySelector('.container');"

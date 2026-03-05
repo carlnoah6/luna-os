@@ -132,6 +132,7 @@ def generate_html(
     steps_data: list[dict[str, Any]],
     title: str = "Plan Timeline",
     subtitle: str = "",
+    debug: bool = False,
 ) -> str:
     """Generate timeline HTML from step data with statuses.
 
@@ -145,6 +146,7 @@ def generate_html(
         f'<div class="subtitle">{subtitle}</div>' if subtitle else ""
     )
     steps_json = json.dumps(steps_data, ensure_ascii=False)
+    debug_js = 'true' if debug else 'false'
 
     return f"""<!DOCTYPE html>
 <html>
@@ -607,7 +609,32 @@ Object.entries(outEdges).forEach(([nodeId, edges]) => {{
             if (targetRow > sourceRow) return 50;
             return 0;
         }}
-        return getScore(a) - getScore(b);
+        const scoreA = getScore(a);
+        const scoreB = getScore(b);
+        if (scoreA !== scoreB) return scoreA - scoreB;
+        
+        // Secondary sort for cross-row edges: by first horizontal segment length
+        // Edges that go further should be on top to avoid crossing
+        const targetRowA = Math.floor(a.targetPhase / COLS_PER_ROW);
+        const targetRowB = Math.floor(b.targetPhase / COLS_PER_ROW);
+        
+        // Check if both edges are cross-row
+        const isACrossRow = targetRowA !== sourceRow;
+        const isBCrossRow = targetRowB !== sourceRow;
+        
+        if (isACrossRow && isBCrossRow) {{
+            // Both are cross-row edges
+            if (a.targetPhase !== b.targetPhase) {{
+                // Different target phases: sort by phase (left to right)
+                return a.targetPhase - b.targetPhase;
+            }}
+            // Same target phase: reverse sort by target Y
+            // This puts edges going to lower targets on top, giving them more horizontal space
+            return b.targetY - a.targetY;
+        }}
+        
+        // At least one is same-row: normal sort by target Y (top to bottom)
+        return a.targetY - b.targetY;
     }});
 }});
 
@@ -630,7 +657,12 @@ Object.entries(inEdges).forEach(([nodeId, edges]) => {{
             if (sourceRow > targetRow) return 50;
             return 0;
         }}
-        return getScore(a) - getScore(b);
+        const scoreA = getScore(a);
+        const scoreB = getScore(b);
+        if (scoreA !== scoreB) return scoreA - scoreB;
+        // Secondary sort: by source phase (left to right), then by source Y (top to bottom)
+        if (a.sourcePhase !== b.sourcePhase) return a.sourcePhase - b.sourcePhase;
+        return a.sourceY - b.sourceY;
     }});
 }});
 
@@ -662,7 +694,9 @@ Object.entries(inEdges).forEach(([nodeId, edges]) => {{
     }});
 }});
 
+/* OLD LAYOUT ENGINE - DISABLED
 let bypassAboveIdx = 0, bypassBelowIdx = 0;
+let edgeCounter = 0;
 
 steps.forEach(s => {{
     s.deps.forEach(depId => {{
@@ -825,7 +859,7 @@ steps.forEach(s => {{
             const edgeOff = edgeOffsets[depId + '->' + s.id] || {{}};
             const outIdx = edgeOff.fromIdx || 0;
             const inIdx = edgeOff.toIdx || 0;
-            const xSpacing = 15;
+            const xSpacing = 25;
             const baseOffset = 30;
             
             // fromX: combine outIdx (per-node) and idx (per-gap) to avoid overlapping
@@ -844,6 +878,28 @@ steps.forEach(s => {{
         }}
         path.setAttribute('marker-end', markerEnd);
         svg.appendChild(path);
+
+        // Add edge label
+        const edgeLabelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        const edgeLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        const pathLen = path.getTotalLength();
+        const midPt = path.getPointAtLength(pathLen / 2);
+        edgeLabel.setAttribute('x', midPt.x);
+        edgeLabel.setAttribute('y', midPt.y - 3);
+        edgeLabel.setAttribute('text-anchor', 'middle');
+        edgeLabel.setAttribute('font-size', '9');
+        edgeLabel.setAttribute('font-weight', '700');
+        edgeLabel.setAttribute('fill', '#333');
+        edgeLabel.textContent = 'Edge' + (++edgeCounter);
+        const bbox = {{x: midPt.x - 15, y: midPt.y - 12, width: 30, height: 12}};
+        edgeLabelBg.setAttribute('x', bbox.x - 2);
+        edgeLabelBg.setAttribute('y', bbox.y - 1);
+        edgeLabelBg.setAttribute('width', bbox.width + 4);
+        edgeLabelBg.setAttribute('height', bbox.height + 2);
+        edgeLabelBg.setAttribute('fill', 'white');
+        edgeLabelBg.setAttribute('opacity', '0.9');
+        svg.appendChild(edgeLabelBg);
+        svg.appendChild(edgeLabel);
         
         // Add branch label if this is a conditional edge
 
@@ -928,7 +984,7 @@ steps.forEach(s => {{
                         const edgeOff = edgeOffsets[s.id + '->' + targetId] || {{}};
                         const outIdx = edgeOff.fromIdx || 0;
                         const inIdx = edgeOff.toIdx || 0;
-                        const xSpacing = 15;
+                        const xSpacing = 25;
                         const rightExtend = 30 + outIdx * xSpacing;
                         const leftExtend = 30 + inIdx * xSpacing;
                         
@@ -995,7 +1051,7 @@ steps.forEach(s => {{
                     const edgeOff = edgeOffsets[s.id + '->' + targetId] || {{}};
                     const outIdx = edgeOff.fromIdx || 0;
                     const inIdx = edgeOff.toIdx || 0;
-                    const xSpacing = 15;
+                    const xSpacing = 25;
                     const baseOffset = 30;
                     
                     const fromX = x1 + baseOffset + (outIdx * xSpacing) + (idx * xSpacing);
@@ -1013,6 +1069,28 @@ steps.forEach(s => {{
                 }}
                 path.setAttribute('marker-end', markerEnd);
                 svg.appendChild(path);
+
+                // Add edge label for branch
+                const branchLabelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                const branchLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                const branchPathLen = path.getTotalLength();
+                const branchMidPt = path.getPointAtLength(branchPathLen / 2);
+                branchLabel.setAttribute('x', branchMidPt.x);
+                branchLabel.setAttribute('y', branchMidPt.y - 3);
+                branchLabel.setAttribute('text-anchor', 'middle');
+                branchLabel.setAttribute('font-size', '9');
+                branchLabel.setAttribute('font-weight', '700');
+                branchLabel.setAttribute('fill', '#333');
+                branchLabel.textContent = 'Edge' + (++edgeCounter);
+                const branchBbox = {{x: branchMidPt.x - 15, y: branchMidPt.y - 12, width: 30, height: 12}};
+                branchLabelBg.setAttribute('x', branchBbox.x - 2);
+                branchLabelBg.setAttribute('y', branchBbox.y - 1);
+                branchLabelBg.setAttribute('width', branchBbox.width + 4);
+                branchLabelBg.setAttribute('height', branchBbox.height + 2);
+                branchLabelBg.setAttribute('fill', 'white');
+                branchLabelBg.setAttribute('opacity', '0.9');
+                svg.appendChild(branchLabelBg);
+                svg.appendChild(branchLabel);
                 
 
             }});
@@ -1021,6 +1099,774 @@ steps.forEach(s => {{
 }});
 
 graph.insertBefore(svg, graph.firstChild);
+
+END OF OLD LAYOUT ENGINE */
+
+// NEW LAYOUT ENGINE
+console.log('=== NEW LAYOUT ENGINE START ===');
+
+let edgeCounter = 0;
+try {{
+
+// 创建统一的边数据结构
+const newEdges = [];
+console.log('NEW LAYOUT ENGINE - Step 1: Creating edge data structure');
+
+// 收集依赖边
+steps.forEach(s => {{
+    s.deps.forEach(depId => {{
+        newEdges.push({{
+            id: depId + '->' + s.id,
+            from: depId,
+            to: s.id,
+            type: 'dependency',
+            isConditional: false,
+            isDone: false
+        }});
+    }});
+}});
+
+// 收集分支边并标记条件边
+steps.forEach(s => {{
+    if (s.is_conditional && s.branches) {{
+        s.branches.forEach(branch => {{
+            const nextSteps = branch.next_steps || [];
+            nextSteps.forEach(targetId => {{
+                const edgeId = s.id + '->' + targetId;
+                const existingEdge = newEdges.find(e => e.id === edgeId);
+                if (existingEdge) {{
+                    existingEdge.isConditional = true;
+                    existingEdge.branchName = branch.name;
+                    existingEdge.isSelected = s.selected_branch === branch.name;
+                }} else {{
+                    newEdges.push({{
+                        id: edgeId,
+                        from: s.id,
+                        to: targetId,
+                        type: 'branch',
+                        isConditional: true,
+                        branchName: branch.name,
+                        isSelected: s.selected_branch === branch.name,
+                        isDone: false
+                    }});
+                }}
+            }});
+        }});
+    }}
+}});
+
+// DEBUG: 打印所有边的信息
+// 分类边的路径类型
+newEdges.forEach(edge => {{
+    const fromNode = nodePositions[edge.from];
+    const toNode = nodePositions[edge.to];
+    if (!fromNode || !toNode) return;
+
+    const fromRow = Math.floor(fromNode.phase / COLS_PER_ROW);
+    const toRow = Math.floor(toNode.phase / COLS_PER_ROW);
+
+    if (fromRow === toRow) {{
+        if (toNode.phase > fromNode.phase) {{
+            edge.pathType = 'same-row-forward';
+        }} else {{
+            edge.pathType = 'same-row-backward';
+        }}
+    }} else {{
+        edge.pathType = 'cross-row';
+        edge.isForward = toRow > fromRow;
+    }}
+}});
+
+// 测试：打印边的数量和分类结果
+console.log('NEW LAYOUT ENGINE - Total edges:', newEdges.length);
+console.log('NEW LAYOUT ENGINE - same-row-forward:', newEdges.filter(e => e.pathType === 'same-row-forward').length);
+console.log('NEW LAYOUT ENGINE - same-row-backward:', newEdges.filter(e => e.pathType === 'same-row-backward').length);
+console.log('NEW LAYOUT ENGINE - cross-row:', newEdges.filter(e => e.pathType === 'cross-row').length);
+
+// STEP 3: 通道分配系统
+
+// 按源节点分组
+const newOutgoingEdges = {{}};
+newEdges.forEach(e => {{
+    if (!newOutgoingEdges[e.from]) newOutgoingEdges[e.from] = [];
+    newOutgoingEdges[e.from].push(e);
+}});
+
+// 按目标节点分组
+const newIncomingEdges = {{}};
+newEdges.forEach(e => {{
+    if (!newIncomingEdges[e.to]) newIncomingEdges[e.to] = [];
+    newIncomingEdges[e.to].push(e);
+}});
+
+// 排序（减少交叉）
+const pathTypePriority = {{
+    'same-row-backward': 0,
+    'cross-row-backward': 1,
+    'same-row-forward': 2,
+    'cross-row-forward': 3
+}};
+
+Object.values(newOutgoingEdges).forEach(edges => {{
+    if (edges.length > 1) {{
+        console.log(`Sorting ${{edges.length}} outgoing edges from node ${{edges[0].from}}`);
+        edges.forEach(e => console.log(`  Before: ${{e.from}}->${{e.to}} pathType=${{e.pathType}}`));
+    }}
+    edges.sort((a, b) => {{
+        const priorityA = pathTypePriority[a.pathType] || 999;
+        const priorityB = pathTypePriority[b.pathType] || 999;
+        if (priorityA !== priorityB) return priorityA - priorityB;
+        
+        // 同类型按目标节点 Y 位置排序
+        const toNodeA = nodePositions[a.to];
+        const toNodeB = nodePositions[b.to];
+        if (toNodeA && toNodeB) {{
+// For cross-row edges, reverse sort
+            if (a.pathType === 'cross-row' && b.pathType === 'cross-row') {{
+                return toNodeB.cy - toNodeA.cy;  // Reverse
+            }}
+            return toNodeA.cy - toNodeB.cy;
+        }}
+        return 0;
+    }});
+    if (edges.length > 1) {{
+        edges.forEach(e => console.log(`  After: ${{e.from}}->${{e.to}}`));
+    }}
+}});
+
+Object.values(newIncomingEdges).forEach(edges => {{
+    edges.sort((a, b) => {{
+        const priorityA = pathTypePriority[a.pathType] || 999;
+        const priorityB = pathTypePriority[b.pathType] || 999;
+        if (priorityA !== priorityB) return priorityA - priorityB;
+        // 同类型按源节点 Y 位置排序
+        const fromNodeA = nodePositions[a.from];
+        const fromNodeB = nodePositions[b.from];
+        if (fromNodeA && fromNodeB) {{
+            // For cross-row edges from the same source, sort by fromChannel.channelIdx
+            if (a.pathType === 'cross-row' && b.pathType === 'cross-row' && a.from === b.from) {{
+                const idxA = a.fromChannel ? a.fromChannel.channelIdx : 0;
+                const idxB = b.fromChannel ? b.fromChannel.channelIdx : 0;
+                return idxA - idxB;  // Normal order (matches outgoing edge order)
+            }}
+            return fromNodeA.cy - fromNodeB.cy;
+        }}
+        return 0;
+    }});
+}});
+
+// 分配通道索引和 Y 偏移
+const newChannels = {{ outgoing: {{}}, incoming: {{}} }};
+const channelSpacing = 20;
+
+Object.entries(newOutgoingEdges).forEach(([nodeId, edges]) => {{
+    newChannels.outgoing[nodeId] = edges.map((e, idx) => ({{
+        edgeId: e.id,
+        channelIdx: idx,
+        yOffset: edges.length > 1 ? (idx - (edges.length - 1) / 2) * channelSpacing : 0
+    }}));
+}});
+
+Object.entries(newIncomingEdges).forEach(([nodeId, edges]) => {{
+    newChannels.incoming[nodeId] = edges.map((e, idx) => ({{
+        edgeId: e.id,
+        channelIdx: idx,
+        yOffset: edges.length > 1 ? (idx - (edges.length - 1) / 2) * channelSpacing : 0
+    }}));
+}});
+
+// 为每条边添加通道信息
+newEdges.forEach(edge => {{
+    const outChannels = newChannels.outgoing[edge.from] || [];
+    const inChannels = newChannels.incoming[edge.to] || [];
+    
+    edge.fromChannel = outChannels.find(c => c.edgeId === edge.id);
+    edge.toChannel = inChannels.find(c => c.edgeId === edge.id);
+}});
+
+// 测试：打印通道分配结果
+console.log('NEW LAYOUT ENGINE - Channel allocation complete');
+console.log('NEW LAYOUT ENGINE - Nodes with multiple outgoing edges:', 
+    Object.values(newChannels.outgoing).filter(c => c.length > 1).length);
+console.log('NEW LAYOUT ENGINE - Nodes with multiple incoming edges:', 
+    Object.values(newChannels.incoming).filter(c => c.length > 1).length);
+
+// STEP 4: 路径生成函数
+
+// 同行正向箭头
+function generateSameRowForwardPath(edge, fromNode, toNode) {{
+    const fromChannel = edge.fromChannel || {{ yOffset: 0 }};
+    const toChannel = edge.toChannel || {{ yOffset: 0 }};
+    
+    const x1 = fromNode.cx + 2;
+    const y1 = fromNode.cy + fromChannel.yOffset;
+    const x2 = toNode.lx - 2;
+    const y2 = toNode.ly + toChannel.yOffset;
+    
+    // 检查是否同高且只有一条边（水平直线）
+    if (Math.abs(fromNode.cy - toNode.cy) < 1 && 
+        fromChannel.yOffset === 0 && 
+        toChannel.yOffset === 0) {{
+        const midY = (fromNode.cy + toNode.cy) / 2;
+        return `M${{x1}},${{midY}} L${{x2}},${{midY}}`;
+    }}
+    
+    // 检查中间是否有节点
+    const intermediateNodes = allNodeBoxes.filter(n =>
+        n.phase > fromNode.phase && 
+        n.phase < toNode.phase &&
+        Math.floor(n.phase / COLS_PER_ROW) === Math.floor(fromNode.phase / COLS_PER_ROW)
+    );
+    
+    if (intermediateNodes.length === 0) {{
+        // 简单曲线
+        const midX = (x1 + x2) / 2;
+        return `M${{x1}},${{y1}} C${{midX}},${{y1}} ${{midX}},${{y2}} ${{x2}},${{y2}}`;
+    }} else {{
+        // 绕过中间节点
+        const bypassSpacing = 18;
+        const rCenter = (fromNode.top + toNode.bottom) / 2;
+        const avgY = (fromNode.cy + toNode.ly) / 2;
+        if (avgY <= rCenter) {{
+            const minTop = Math.min(...intermediateNodes.map(n => n.top));
+            const arcY = minTop - 35 - (bypassAboveIdx * bypassSpacing);
+            bypassAboveIdx++;
+            return `M${{x1}},${{y1}} C${{x1}},${{arcY}} ${{x2}},${{arcY}} ${{x2}},${{y2}}`;
+        }} else {{
+            const maxBot = Math.max(...intermediateNodes.map(n => n.bottom));
+            const arcY = maxBot + 35 + (bypassBelowIdx * bypassSpacing);
+            bypassBelowIdx++;
+            return `M${{x1}},${{y1}} C${{x1}},${{arcY}} ${{x2}},${{arcY}} ${{x2}},${{y2}}`;
+        }}
+    }}
+}}
+
+// 同行反向箭头（循环）
+function generateSameRowBackwardPath(edge, fromNode, toNode) {{
+    // 自循环：进出都在最上面，不需要偏移
+    const isSelfLoop = edge.from === edge.to;
+    
+    const fromChannel = edge.fromChannel || {{ channelIdx: 0, yOffset: 0 }};
+    const toChannel = edge.toChannel || {{ channelIdx: 0, yOffset: 0 }};
+    
+    const x1 = fromNode.cx + 2;
+    const y1 = fromNode.cy + fromChannel.yOffset;
+    const x2 = toNode.lx - 2;
+    const y2 = toNode.ly + toChannel.yOffset;
+    
+    // 计算弧线高度
+    const minTop = Math.min(fromNode.top, toNode.top);
+    const arcY = isSelfLoop 
+        ? minTop - 60  // 自循环固定在最上面
+        : minTop - 60 - (bypassAboveIdx * 18);
+    if (!isSelfLoop) {{
+        bypassAboveIdx++;
+    }}
+    
+    // 计算 X 偏移（基于通道索引）
+    const xSpacing = 25;
+    const rightExtend = isSelfLoop ? 30 : 30 + fromChannel.channelIdx * xSpacing;
+    const leftExtend = isSelfLoop ? 30 : 30 + toChannel.channelIdx * xSpacing;
+    
+    // 折线路径
+    return `M${{x1}},${{y1}} ` +
+           `H${{x1 + rightExtend}} ` +
+           `V${{arcY}} ` +
+           `H${{x2 - leftExtend}} ` +
+           `V${{y2}} ` +
+           `H${{x2}}`;
+}}
+
+// 跨行箭头
+function generateCrossRowPath(edge, fromNode, toNode) {{
+    const fromChannel = edge.fromChannel || {{ channelIdx: 0, yOffset: 0 }};
+    const toChannel = edge.toChannel || {{ channelIdx: 0, yOffset: 0 }};
+    
+    const x1 = fromNode.cx + 2;
+    const y1 = fromNode.cy + fromChannel.yOffset;
+    const x2 = toNode.lx - 2;
+    const y2 = toNode.ly + toChannel.yOffset;
+    
+    // 计算 gap 信息
+    const fromRow = Math.floor(fromNode.phase / COLS_PER_ROW);
+    const toRow = Math.floor(toNode.phase / COLS_PER_ROW);
+    const isForward = toRow > fromRow;
+    const isBackward = toNode.phase < fromNode.phase;
+    
+    const gapKey = Math.min(fromRow, toRow) + '-' + Math.max(fromRow, toRow);
+    const dirKey = gapKey + (isForward ? '-fwd' : '-bwd');
+    
+    // Use pre-assigned gapIdx if available
+    const gapIdx = edge.preAssignedGapIdx !== undefined ? edge.preAssignedGapIdx : (() => {{
+        if (!crossRowArrowIdx[dirKey]) crossRowArrowIdx[dirKey] = 0;
+        const idx = crossRowArrowIdx[dirKey];
+        crossRowArrowIdx[dirKey]++;
+        return idx;
+    }})();
+    
+    // 计算 X 位置（基于通道索引）
+    const xSpacing = 25;
+    
+    // 计算 gap 的中间位置（统一基准）
+    const fromRowBottom = rowY[fromRow] + rowMaxH[fromRow];
+    const toRowTop = rowY[toRow];
+    const gapHeight = toRowTop - fromRowBottom;
+    const gapCenter = fromRowBottom + gapHeight / 2;
+    
+    // 对于反向箭头（从右往左），使用简化路径
+    if (isBackward) {{
+        // 反向箭头在 gap 中间上方，每条间隔 15px
+        const arcY = gapCenter - 25 - (gapIdx * 25);
+        
+        // 计算 X 偏移
+        const rightExtend = 30 + (edge.globalXChannelIdx !== undefined ? edge.globalXChannelIdx : fromChannel.channelIdx) * xSpacing;
+        const leftExtend = 30 + (edge.globalXChannelIdx !== undefined ? edge.globalXChannelIdx : toChannel.channelIdx) * xSpacing;
+        
+        // 简化路径：右→上→左→下（3次转折）
+        return `M${{x1}},${{y1}} H${{x1 + rightExtend}} V${{arcY}} H${{x2 - leftExtend}} V${{y2}} H${{x2}}`;
+    }}
+    
+    // 正向箭头使用原来的路径
+    const fromX = x1 + 30 + ((edge.globalXChannelIdx !== undefined ? edge.globalXChannelIdx : fromChannel.channelIdx) * xSpacing);
+    const toX = x2 - 30 - ((edge.globalXChannelIdx !== undefined ? edge.globalXChannelIdx : toChannel.channelIdx) * xSpacing);
+    
+    // 正向箭头在 gap 中间下方，每条间隔 15px
+    const gapMid = gapCenter + 25 + (gapIdx * 25);
+    
+    // 折线路径
+    return `M${{x1}},${{y1}} H${{fromX}} V${{gapMid}} H${{toX}} V${{y2}} H${{x2}}`;
+}}
+
+console.log('NEW LAYOUT ENGINE - Path generation functions defined');
+
+// STEP 5: 样式应用逻辑
+
+function applyEdgeStyle(edge) {{
+    const sourceStep = stepMap[edge.from];
+    const targetStep = stepMap[edge.to];
+    
+    let strokeColor, strokeWidth, strokeDasharray, markerEnd;
+    
+    const isDone = sourceStep && sourceStep.status === 'done';
+    const isTargetSkipped = targetStep && targetStep.status === 'skipped';
+    
+    if (isTargetSkipped) {{
+        // 目标被跳过：灰色虚线
+        strokeColor = '#ccc';
+        strokeWidth = '1.5';
+        strokeDasharray = '4,4';
+        markerEnd = 'url(#arrowhead)';
+    }} else if (edge.isConditional) {{
+        // 条件边
+        if (edge.isSelected) {{
+            // 选中的分支：蓝色或绿色实线
+            strokeColor = isDone ? '#4CAF50' : '#2196F3';
+            strokeWidth = '1.5';
+            strokeDasharray = '';
+            markerEnd = isDone ? 'url(#arrowhead-done)' : 'url(#arrowhead)';
+        }} else if (sourceStep && sourceStep.selected_branch) {{
+            // 未选中的分支：灰色虚线
+            strokeColor = '#ccc';
+            strokeWidth = '1.5';
+            strokeDasharray = '4,4';
+            markerEnd = 'url(#arrowhead)';
+        }} else {{
+            // 未决定的分支：灰色点线
+            strokeColor = '#ccc';
+            strokeWidth = '1.5';
+            strokeDasharray = '6,3';
+            markerEnd = 'url(#arrowhead)';
+        }}
+    }} else {{
+        // 普通依赖边
+        strokeColor = isDone ? '#4CAF50' : '#ddd';
+        strokeWidth = isDone ? '2' : '1.5';
+        strokeDasharray = '';
+        markerEnd = isDone ? 'url(#arrowhead-done)' : 'url(#arrowhead)';
+    }}
+    
+    return {{ strokeColor, strokeWidth, strokeDasharray, markerEnd }};
+}}
+
+console.log('NEW LAYOUT ENGINE - Style application function defined');
+
+// STEP 5.5: 全局 X 通道分配（解决跨行箭头竖线重叠问题）
+
+// 为跨行箭头分配全局 X 通道索引
+const crossRowEdges = newEdges.filter(e => e.pathType === 'cross-row');
+
+// 按 gap（行间间隙）分组
+const edgesByGap = {{}};
+crossRowEdges.forEach(edge => {{
+    const fromNode = nodePositions[edge.from];
+    const toNode = nodePositions[edge.to];
+    if (!fromNode || !toNode) return;
+    
+    const fromRow = Math.floor(fromNode.phase / COLS_PER_ROW);
+    const toRow = Math.floor(toNode.phase / COLS_PER_ROW);
+    const gapKey = Math.min(fromRow, toRow) + '-' + Math.max(fromRow, toRow);
+    
+    if (!edgesByGap[gapKey]) edgesByGap[gapKey] = [];
+    edgesByGap[gapKey].push(edge);
+}});
+
+// 为每个 gap 的箭头分配 X 通道索引
+Object.entries(edgesByGap).forEach(([gapKey, edges]) => {{
+    // 按源节点的实际 X 坐标排序（从左到右）
+    edges.sort((a, b) => {{
+        const fromNodeA = nodePositions[a.from];
+        const fromNodeB = nodePositions[b.from];
+        if (!fromNodeA || !fromNodeB) return 0;
+        
+        // 按源节点的 X 坐标排序
+        const xA = fromNodeA.cx;
+        const xB = fromNodeB.cx;
+        if (Math.abs(xA - xB) > 1) return xA - xB;
+        
+        // X 坐标相同时，按 phase 排序
+        if (fromNodeA.phase !== fromNodeB.phase) return fromNodeA.phase - fromNodeB.phase;
+        
+        // 同一个源节点的多条边，按局部通道索引反向排序
+        // This swaps the X positions (E3-2 and E4-2)
+        const localIdxA = a.fromChannel ? a.fromChannel.channelIdx : 0;
+        const localIdxB = b.fromChannel ? b.fromChannel.channelIdx : 0;
+        return localIdxB - localIdxA;  // Reversed
+    }});
+    
+    // 检测 X 坐标相近的箭头，为它们分配不同的偏移
+    let channelIdx = 0;
+    let lastX = null;
+    const xTolerance = 50; // X 坐标在 50px 范围内认为是相近的
+    
+    edges.forEach(edge => {{
+        const fromNode = nodePositions[edge.from];
+        if (!fromNode) return;
+        
+        const currentX = fromNode.cx;
+        
+        // 如果当前箭头的 X 坐标和上一个相近，使用下一个通道索引
+        if (lastX !== null && Math.abs(currentX - lastX) < xTolerance) {{
+            channelIdx++;
+        }} else {{
+            // 否则，重置通道索引
+            channelIdx = 0;
+        }}
+        
+        edge.globalXChannelIdx = channelIdx;
+        console.log(`    -> assigned globalXChannelIdx=${{channelIdx}}`);
+        lastX = currentX;
+    }});
+}});
+
+console.log('NEW LAYOUT ENGINE - Global X channel allocation complete');
+
+
+
+
+
+// STEP 6: 整合新引擎 - 使用新引擎绘制所有箭头
+
+// 重置 bypass 索引
+let bypassAboveIdx = 0;
+let bypassBelowIdx = 0;
+
+// Pre-assign gapIdx for cross-row edges to control gap order
+const gapIdxCounter = {{}};
+const crossRowEdgesGrouped = {{}};
+
+// Group cross-row edges by source
+newEdges.forEach(edge => {{
+    if (edge.pathType === 'cross-row') {{
+        if (!crossRowEdgesGrouped[edge.from]) crossRowEdgesGrouped[edge.from] = [];
+        crossRowEdgesGrouped[edge.from].push(edge);
+    }}
+}});
+
+// For each source, sort edges by fromChannel.channelIdx (reversed) and assign gapIdx
+Object.values(crossRowEdgesGrouped).forEach(edges => {{
+    edges.sort((a, b) => {{
+        const idxA = a.fromChannel ? a.fromChannel.channelIdx : 0;
+        const idxB = b.fromChannel ? b.fromChannel.channelIdx : 0;
+        return idxB - idxA;  // Reverse: higher idx first
+    }});
+    
+    edges.forEach(edge => {{
+        const fromNode = nodePositions[edge.from];
+        const toNode = nodePositions[edge.to];
+        if (!fromNode || !toNode) return;
+        
+        const fromRow = Math.floor(fromNode.phase / COLS_PER_ROW);
+        const toRow = Math.floor(toNode.phase / COLS_PER_ROW);
+        const isForward = toRow > fromRow;
+        const gapKey = Math.min(fromRow, toRow) + '-' + Math.max(fromRow, toRow);
+        const dirKey = gapKey + (isForward ? '-fwd' : '-bwd');
+        
+        if (!gapIdxCounter[dirKey]) gapIdxCounter[dirKey] = 0;
+        edge.preAssignedGapIdx = gapIdxCounter[dirKey];
+        gapIdxCounter[dirKey]++;
+    }});
+}});
+
+// Sort edges before rendering to control gap order
+// For cross-row edges from the same source, reverse order (higher channelIdx first)
+const edgeOrder = [];
+newEdges.forEach((edge, idx) => {{
+    edgeOrder.push({{ edge, originalIdx: idx }});
+}});
+
+edgeOrder.sort((a, b) => {{
+    const edgeA = a.edge;
+    const edgeB = b.edge;
+    
+    // Non-cross-row edges: keep original order
+    if (edgeA.pathType !== 'cross-row' && edgeB.pathType !== 'cross-row') {{
+        return a.originalIdx - b.originalIdx;
+    }}
+    
+    // One is cross-row, one is not: cross-row edges last
+    if (edgeA.pathType !== 'cross-row') return -1;
+    if (edgeB.pathType !== 'cross-row') return 1;
+    
+    // Both are cross-row: sort by source, then by fromChannel.channelIdx (reversed)
+    if (edgeA.from !== edgeB.from) {{
+        return a.originalIdx - b.originalIdx;  // Different sources: keep original order
+    }}
+    
+    // Same source: reverse by channelIdx
+    const idxA = edgeA.fromChannel ? edgeA.fromChannel.channelIdx : 0;
+    const idxB = edgeB.fromChannel ? edgeB.fromChannel.channelIdx : 0;
+    return idxB - idxA;  // Reverse: higher idx first
+}});
+
+// Rebuild newEdges array
+const sortedEdges = edgeOrder.map(item => item.edge);
+newEdges.length = 0;
+sortedEdges.forEach(edge => newEdges.push(edge));
+
+// 使用新引擎绘制所有边
+newEdges.forEach(edge => {{
+    const fromNode = nodePositions[edge.from];
+    const toNode = nodePositions[edge.to];
+    
+    if (!fromNode || !toNode) return;
+    if (!edge.fromChannel || !edge.toChannel) return;
+    
+    // 生成路径
+    let pathD;
+    switch (edge.pathType) {{
+        case 'same-row-forward':
+            pathD = generateSameRowForwardPath(edge, fromNode, toNode);
+            break;
+        case 'same-row-backward':
+            pathD = generateSameRowBackwardPath(edge, fromNode, toNode);
+            break;
+        case 'cross-row':
+            pathD = generateCrossRowPath(edge, fromNode, toNode);
+            break;
+        default:
+            console.warn('Unknown path type:', edge.pathType);
+            return;
+    }}
+    
+    // 应用样式
+    const style = applyEdgeStyle(edge);
+    
+    // 创建 SVG path 元素
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', pathD);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', style.strokeColor);
+    path.setAttribute('stroke-width', style.strokeWidth);
+    if (style.strokeDasharray) {{
+        path.setAttribute('stroke-dasharray', style.strokeDasharray);
+    }}
+    path.setAttribute('marker-end', style.markerEnd);
+    
+    svg.appendChild(path);
+
+    // Add edge labels (multi-segment for polylines)
+    const debugMode = {debug_js};
+    const currentEdgeNum = ++edgeCounter;
+    const pathLen = path.getTotalLength();
+    
+    // Parse path to detect segments (H/V commands indicate polyline)
+    const isPolyline = pathD.includes(' H') && pathD.includes(' V');
+    
+    if (debugMode && isPolyline) {{
+        // Parse path to extract actual segments
+        const pathSegments = [];
+        const parts = pathD.split(/(?=[MHVL])/);  // Split before each command
+        let currentX = 0, currentY = 0;
+        
+        parts.forEach(part => {{
+            const cmd = part[0];
+            const coords = part.substring(1).split(/[,\s]+/).filter(s => s).map(Number);
+            
+            if (cmd === 'M') {{
+                currentX = coords[0];
+                currentY = coords[1];
+            }} else if (cmd === 'H') {{
+                const newX = coords[0];
+                pathSegments.push({{
+                    x1: currentX, y1: currentY,
+                    x2: newX, y2: currentY
+                }});
+                currentX = newX;
+            }} else if (cmd === 'V') {{
+                const newY = coords[0];
+                pathSegments.push({{
+                    x1: currentX, y1: currentY,
+                    x2: currentX, y2: newY
+                }});
+                currentY = newY;
+            }} else if (cmd === 'L') {{
+                const newX = coords[0];
+                const newY = coords[1];
+                pathSegments.push({{
+                    x1: currentX, y1: currentY,
+                    x2: newX, y2: newY
+                }});
+                currentX = newX;
+                currentY = newY;
+            }}
+        }});
+        
+        // Label each segment at its midpoint
+        pathSegments.forEach((seg, idx) => {{
+            const midX = (seg.x1 + seg.x2) / 2;
+            const midY = (seg.y1 + seg.y2) / 2;
+            
+            const segLabelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            const segLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            segLabel.setAttribute('x', midX);
+            segLabel.setAttribute('y', midY - 3);
+            segLabel.setAttribute('text-anchor', 'middle');
+            segLabel.setAttribute('font-size', '8');
+            segLabel.setAttribute('font-weight', '700');
+            segLabel.setAttribute('fill', '#666');
+            segLabel.textContent = 'E' + currentEdgeNum + '-' + (idx + 1);
+            
+            const bbox = {{x: midX - 15, y: midY - 12, width: 30, height: 12}};
+            segLabelBg.setAttribute('x', bbox.x - 2);
+            segLabelBg.setAttribute('y', bbox.y - 1);
+            segLabelBg.setAttribute('width', bbox.width + 4);
+            segLabelBg.setAttribute('height', bbox.height + 2);
+            segLabelBg.setAttribute('fill', 'white');
+            segLabelBg.setAttribute('opacity', '0.85');
+            svg.appendChild(segLabelBg);
+            svg.appendChild(segLabel);
+        }});
+    }} else if (debugMode) {{
+        // Single label for simple curves
+        const midPt = path.getPointAtLength(pathLen / 2);
+        const edgeLabelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        const edgeLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        edgeLabel.setAttribute('x', midPt.x);
+        edgeLabel.setAttribute('y', midPt.y - 3);
+        edgeLabel.setAttribute('text-anchor', 'middle');
+        edgeLabel.setAttribute('font-size', '9');
+        edgeLabel.setAttribute('font-weight', '700');
+        edgeLabel.setAttribute('fill', '#333');
+        edgeLabel.textContent = 'E' + currentEdgeNum;
+        
+        const bbox = {{x: midPt.x - 15, y: midPt.y - 12, width: 30, height: 12}};
+        edgeLabelBg.setAttribute('x', bbox.x - 2);
+        edgeLabelBg.setAttribute('y', bbox.y - 1);
+        edgeLabelBg.setAttribute('width', bbox.width + 4);
+        edgeLabelBg.setAttribute('height', bbox.height + 2);
+        edgeLabelBg.setAttribute('fill', 'white');
+        edgeLabelBg.setAttribute('opacity', '0.9');
+        svg.appendChild(edgeLabelBg);
+        svg.appendChild(edgeLabel);
+    }}
+}});
+
+console.log('NEW LAYOUT ENGINE - All edges rendered');
+
+
+
+// 将 SVG 插入到 graph 中
+console.log('NEW LAYOUT ENGINE - Inserting SVG into graph');
+graph.insertBefore(svg, graph.firstChild);
+console.log('NEW LAYOUT ENGINE - SVG inserted successfully');
+
+// STEP 7: Detect and mark edge intersections (after SVG is in DOM)
+const debugMode = {debug_js};
+if (debugMode) {{
+console.log('NEW LAYOUT ENGINE - Detecting intersections (post-insert)');
+
+// Helper: line segment intersection test
+function segmentsIntersect(p1, p2, p3, p4) {{
+    const det = (p2.x - p1.x) * (p4.y - p3.y) - (p4.x - p3.x) * (p2.y - p1.y);
+    if (Math.abs(det) < 1e-10) return null;
+    const t = ((p3.x - p1.x) * (p4.y - p3.y) - (p4.x - p3.x) * (p3.y - p1.y)) / det;
+    const u = ((p3.x - p1.x) * (p2.y - p1.y) - (p2.x - p1.x) * (p3.y - p1.y)) / det;
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {{
+        return {{ x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) }};
+    }}
+    return null;
+}}
+
+const pathSamples = [];
+document.querySelectorAll('svg.arrows path').forEach((path, idx) => {{
+    const len = path.getTotalLength();
+    const samples = [];
+    const sampleCount = Math.max(50, Math.floor(len / 5));
+    for (let i = 0; i <= sampleCount; i++) {{
+        samples.push(path.getPointAtLength(len * i / sampleCount));
+    }}
+    pathSamples.push({{ path, samples }});
+}});
+
+console.log(`Sampled ${{pathSamples.length}} paths`);
+
+const intersections = [];
+for (let i = 0; i < pathSamples.length; i++) {{
+    for (let j = i + 1; j < pathSamples.length; j++) {{
+        const samplesA = pathSamples[i].samples;
+        const samplesB = pathSamples[j].samples;
+        
+        for (let a = 0; a < samplesA.length - 1; a++) {{
+            for (let b = 0; b < samplesB.length - 1; b++) {{
+                const pt = segmentsIntersect(samplesA[a], samplesA[a + 1], samplesB[b], samplesB[b + 1]);
+                if (pt) {{
+                    const isDuplicate = intersections.some(existing => 
+                        Math.abs(existing.x - pt.x) < 5 && Math.abs(existing.y - pt.y) < 5
+                    );
+                    if (!isDuplicate) {{
+                        intersections.push({{ x: pt.x, y: pt.y, type: 'cross' }});
+                    }}
+                }}
+
+            }}
+        }}
+    }}
+}}
+
+console.log(`NEW LAYOUT ENGINE - Found ${{intersections.length}} intersections/overlaps`);
+
+intersections.forEach(pt => {{
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', pt.x);
+    circle.setAttribute('cy', pt.y);
+    circle.setAttribute('r', '6');
+    circle.setAttribute('fill', 'rgba(255, 100, 100, 0.3)');
+    circle.setAttribute('stroke', 'rgba(255, 50, 50, 0.6)');
+    circle.setAttribute('stroke-width', '1.5');
+    svg.appendChild(circle);
+}});
+}}
+
+
+}} catch (error) {{
+    console.error('NEW LAYOUT ENGINE ERROR:', error);
+    console.error('Error stack:', error.stack);
+    // 如果新引擎失败，尝试使用旧引擎
+    console.warn('NEW LAYOUT ENGINE FAILED - This is expected during debugging');
+}}
+
+console.log('=== NEW LAYOUT ENGINE END ===');
+
 
 // Add branch labels inside conditional nodes, aligned with outgoing edges
 // Create a separate SVG layer on top for labels
@@ -1086,8 +1932,27 @@ def render_png(html_content: str, output_path: str) -> str:
                 viewport={"width": 1100, "height": 600},
                 device_scale_factor=2,
             )
+            console_logs = []
+            page.on('console', lambda msg: console_logs.append(f"[{{msg.type}}] {{msg.text}}"))
+
             page.goto(f"file://{html_file}")
             page.wait_for_timeout(300)
+            
+            # 捕获控制台日志
+            
+            # 等待一段时间让 JavaScript 执行
+            page.wait_for_timeout(1000)
+            
+            # 检查 SVG 是否存在
+            svg_exists = page.evaluate("() => document.querySelector('svg.arrows') !== null")
+            
+            if not svg_exists:
+                print("\n=== BROWSER CONSOLE LOGS ===")
+                for log in console_logs:
+                    print(log)
+                print("=== END CONSOLE LOGS ===\n")
+                raise Exception("SVG element 'svg.arrows' not found after 1 second")
+            
             # Wait for SVG to be fully rendered
             page.wait_for_selector('svg.arrows', state='attached')
             page.wait_for_timeout(500)
