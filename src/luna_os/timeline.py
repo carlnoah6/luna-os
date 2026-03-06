@@ -1700,7 +1700,7 @@ newEdges.forEach(edge => {{
         
         parts.forEach(part => {{
             const cmd = part[0];
-            const coords = part.substring(1).split(/[,\s]+/).filter(s => s).map(Number);
+            const coords = part.substring(1).split(/[,\\s]+/).filter(s => s).map(Number);
             
             if (cmd === 'M') {{
                 currentX = coords[0];
