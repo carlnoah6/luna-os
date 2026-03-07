@@ -8,6 +8,7 @@ and AgentRunner.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -16,6 +17,8 @@ import time
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+import requests
 
 from luna_os.agents.base import AgentRunner
 from luna_os.events import process_events, resolve_plan_for_task
@@ -346,28 +349,141 @@ class Planner:
     def _notify_main_session(
         self, plan: Plan, event: str, detail: str = "",
     ) -> None:
-        """Send notification to the plan's chat via Feishu API with @Luna mention.
+        """Send notification to the plan's chat and trigger Luna LLM thinking.
 
-        Sends a message through Feishu API that mentions the Luna bot,
-        which will appear as a notification to users.
+        Uses webhook to send message that will trigger Luna's LLM thinking,
+        allowing her to automatically replan or restart based on step results.
 
         Events: step_started, step_done, step_failed, plan_completed,
                 plan_stuck, plan_started
         """
-        if not self.notifications:
-            return
-
         goal = (plan.goal or "")[:60]
         text = f"[Plan {event}] {plan.id}: {goal}"
         if detail:
             text += f"\n{detail}"
 
+        # 使用 webhook 触发 Luna 思考
+        success = self._trigger_luna_thinking(plan.chat_id, text)
+        
+        # 如果 webhook 失败，回退到普通通知
+        if not success and self.notifications:
+            try:
+                self.notifications.send_message(plan.chat_id, text)
+                logger.info("Plan notification sent via API (webhook failed)")
+            except Exception as exc:
+                logger.warning("Plan notification failed: %s", exc)
+
+    def _trigger_luna_thinking(
+        self, chat_id: str, text: str, sender_name: str = "Planner"
+    ) -> bool:
+        """通过 Feishu webhook 发送消息，触发 Luna LLM 思考。
+        
+        与 _notify_main_session 不同，这个方法会触发 Luna 的 LLM 思考，
+        让她能够根据步骤完成/出错信息自动 replan 或 restart。
+        
+        Args:
+            chat_id: 目标群聊 ID
+            text: 消息内容
+            sender_name: 发送者名称（默认 "Planner"）
+            
+        Returns:
+            bool: 是否发送成功
+        """
+        # Feishu webhook 配置
+        webhook_url = "http://localhost:3000/feishu/events"
+        app_id = "cli_a90c3a6163785ed2"
+        verification_token = "8k6SrYOCgl6lBiWjhawBQeuy58Msuis0"
+        encrypt_key = "LunaOpenClawBot"
+        tenant_key = "736588c9260f175e"
+        luna_bot_open_id = "ou_88371dccab8541963f7f6a108990d7b3"
+        sender_open_id = "ou_35f664e694dd100adf97b867e68e1d3a"  # Carl's open_id
+        
+        timestamp = str(int(time.time()))
+        nonce = f"planner-{int(time.time() * 1000)}"
+        event_id = f"planner-event-{int(time.time() * 1000)}"
+        message_id = f"om_planner_{int(time.time() * 1000)}"
+        create_time = timestamp + "000"
+        
+        # 构造消息内容（@ Luna 确保触发）
+        content_text = f"@_user_1 {text}"
+        
+        # 构造 webhook 消息体
+        data = {
+            "schema": "2.0",
+            "header": {
+                "event_id": event_id,
+                "event_type": "im.message.receive_v1",
+                "create_time": create_time,
+                "token": verification_token,
+                "app_id": app_id,
+                "tenant_key": tenant_key
+            },
+            "event": {
+                "sender": {
+                    "sender_id": {
+                        "open_id": sender_open_id,
+                        "user_id": sender_name
+                    },
+                    "sender_type": "user",
+                    "tenant_key": tenant_key
+                },
+                "message": {
+                    "message_id": message_id,
+                    "root_id": "",
+                    "parent_id": "",
+                    "create_time": create_time,
+                    "chat_id": chat_id,
+                    "chat_type": "group",
+                    "message_type": "text",
+                    "content": json.dumps({"text": content_text}, ensure_ascii=False),
+                    "mentions": [
+                        {
+                            "key": "@_user_1",
+                            "id": {
+                                "open_id": luna_bot_open_id,
+                                "user_id": "luna_bot"
+                            },
+                            "name": "Luna",
+                            "tenant_key": tenant_key
+                        }
+                    ]
+                }
+            }
+        }
+        
+        # 计算签名
+        data_str = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+        content = timestamp + nonce + encrypt_key + data_str
+        signature = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        
+        # 发送请求
+        headers = {
+            "Content-Type": "application/json",
+            "x-lark-request-timestamp": timestamp,
+            "x-lark-request-nonce": nonce,
+            "x-lark-signature": signature
+        }
+        
         try:
-            # Send via Feishu API (will appear as notification but won't trigger Luna)
-            self.notifications.send_message(plan.chat_id, text)
-            logger.info("Plan notification sent to %s", plan.chat_id)
+            response = requests.post(
+                webhook_url,
+                headers=headers,
+                data=data_str.encode('utf-8'),
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                logger.info("✅ Webhook 消息已发送到 %s，触发 Luna 思考", chat_id)
+                return True
+            else:
+                logger.warning("❌ Webhook 发送失败: HTTP %d", response.status_code)
+                return False
+                
         except Exception as exc:
-            logger.warning("Plan notification failed: %s", exc)
+            logger.warning("❌ Webhook 发送异常: %s", exc)
+            return False
+
+
     def _send_card(self, chat_id: str, card_data: dict[str, Any]) -> dict[str, Any]:
         """Send an interactive card. Returns response with message_id."""
         if self.notifications and chat_id:
@@ -1295,8 +1411,9 @@ Report results to: {chat_id}
             raw_deps = ns.get("depends_on") or []
             step_num = next_num + i
             if raw_deps:
-                # User-provided deps are relative (0-based within new steps), convert to absolute
-                deps = [d + next_num for d in raw_deps if d + next_num != step_num]
+                # User-provided deps: treat as 1-indexed absolute step numbers
+                # (not relative to new steps). Filter out self-references.
+                deps = [d for d in raw_deps if d != step_num]
             elif auto_deps:
                 # Auto-deps are already absolute step numbers
                 deps = list(auto_deps)
