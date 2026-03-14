@@ -357,6 +357,8 @@ class MemoryBackend(StorageBackend):
         depends_on: list[int] | None = None,
         timeout_minutes: int | None = None,
         model: str | None = None,
+        step_type: str = "normal",
+        branches: list | None = None,
     ) -> None:
         plan = self._plans.get(plan_id)
         if plan:
@@ -414,3 +416,7 @@ class MemoryBackend(StorageBackend):
             if e.id in ids_set:
                 e.processed = True
                 e.processed_at = now_utc()
+
+    def log_plan_event(self, plan_id: str, event_type: str = "", event_data: dict | None = None, **kwargs) -> None:
+        """No-op implementation for testing (event logging not needed in memory backend)."""
+        pass

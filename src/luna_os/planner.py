@@ -81,7 +81,8 @@ def normalize_step(raw: dict[str, Any]) -> dict[str, Any]:
         or "Untitled"
     )
     prompt = raw.get("prompt") or raw.get("detail") or raw.get("description") or ""
-    depends_on = raw.get("depends_on") or raw.get("deps")
+    # Use explicit None check to avoid treating 0 (falsy) as missing
+    depends_on = raw["depends_on"] if "depends_on" in raw else raw.get("deps")
     if depends_on is None:
         depends_on = []
     if isinstance(depends_on, int):
