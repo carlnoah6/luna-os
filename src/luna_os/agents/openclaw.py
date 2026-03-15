@@ -92,7 +92,77 @@ class OpenClawRunner(AgentRunner):
             session_key, proc.pid, task_id,
         )
 
+        # Code-layer safety net: start a sentinel that watches the agent process
+        # and auto-fails the task if the agent exits without calling emit_event.py.
+        # More immediate than the watchdog cron (fires on process exit, not on schedule).
+        if task_id:
+            self._start_sentinel(proc.pid, task_id)
+
         return session_key
+
+    def _start_sentinel(self, agent_pid: int, task_id: str) -> None:
+        """Start a sentinel process that auto-fails the task if the agent exits without reporting.
+
+        The sentinel waits for the agent process to exit, then checks if the task
+        is still in 'running' state. If so, it calls emit_event.py step.failed —
+        a code-layer safety net that fires immediately on process exit (not on cron schedule).
+        """
+        ws = os.environ.get("OPENCLAW_WORKSPACE", "/home/ubuntu/.openclaw/workspace")
+        emit_script = f"{ws}/scripts/emit_event.py"
+
+        # Inline Python sentinel: wait for pid, then check+fail if task still running
+        sentinel_code = f"""
+import subprocess, sys, time, os
+pid = {agent_pid}
+task_id = {task_id!r}
+emit_script = {emit_script!r}
+
+# Wait for the agent process to finish
+try:
+    os.waitpid(pid, 0)
+except (ChildProcessError, ProcessLookupError):
+    pass  # Already gone
+except Exception:
+    # waitpid may fail if pid is not a child of this process; poll instead
+    while True:
+        try:
+            os.kill(pid, 0)
+            time.sleep(2)
+        except ProcessLookupError:
+            break
+        except Exception:
+            break
+
+# Give the task a moment to write its emit_event.py result
+time.sleep(3)
+
+# Check task status via emit_event.py noop: if task is still 'running', auto-fail
+result = subprocess.run(
+    ["python3", emit_script, "step.failed",
+     "--task-id", task_id,
+     "--result", "subagent process exited without calling emit_event.py (sentinel auto-fail)"],
+    capture_output=True, text=True, timeout=30,
+)
+# emit_event.py returns non-zero if the task is already done/failed (idempotent guard)
+# So we only log; the planner handles deduplication
+if result.returncode == 0:
+    import logging
+    logging.getLogger("luna_os.sentinel").info(
+        "Sentinel auto-failed task %s (agent pid=%s exited without reporting)", task_id, pid
+    )
+"""
+
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, "-c", sentinel_code],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=open(f"/tmp/sentinel-{task_id}.log", "w"),  # noqa: SIM115
+            )
+            logger.info("Started sentinel: pid=%d for task=%s agent_pid=%d",
+                        proc.pid, task_id, agent_pid)
+        except Exception as exc:
+            logger.warning("Failed to start sentinel for task %s: %s", task_id, exc)
 
     def _start_bridge(
         self, session_label: str, chat_id: str, task_id: str = "",

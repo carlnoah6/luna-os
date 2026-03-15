@@ -174,9 +174,12 @@ class PostgresBackend(StorageBackend):
 
     def fail_task(self, task_id: str, error: str = "") -> None:
         now = now_utc()
+        # Idempotent guard: only fail if still running (prevents sentinel from
+        # overwriting a task that already completed normally via emit_event.py).
         self._execute(
             """UPDATE tasks SET status='failed', result=%s,
-                   completed_at=%s, updated_at=%s WHERE id=%s""",
+                   completed_at=%s, updated_at=%s
+               WHERE id=%s AND status='running'""",
             (error, now, now, task_id),
         )
 
