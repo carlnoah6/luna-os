@@ -168,7 +168,8 @@ class PostgresBackend(StorageBackend):
         now = now_utc()
         self._execute(
             """UPDATE tasks SET status='done', result=%s,
-                   completed_at=%s, updated_at=%s WHERE id=%s""",
+                   completed_at=%s, updated_at=%s
+               WHERE id=%s AND status='running'""",
             (result, now, now, task_id),
         )
 

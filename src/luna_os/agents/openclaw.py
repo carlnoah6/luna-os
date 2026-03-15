@@ -279,3 +279,83 @@ if result.returncode == 0:
             if age < 300:
                 return True
         return False
+
+    def spawn_monitor(
+        self,
+        plan_id: str,
+        goal: str,
+        chat_id: str,
+        running_steps: list[dict],
+        timeout_minutes: int = 60,
+    ) -> str:
+        """Spawn a monitor subagent to watch running steps.
+        
+        Returns the monitor session key.
+        """
+        session_key = f"agent:main:subagent:monitor-{plan_id}"
+        
+        # Build running steps info with JSONL paths
+        SESSIONS_DIR = "/home/ubuntu/.openclaw/agents/main/sessions"
+        SESSIONS_JSON = f"{SESSIONS_DIR}/sessions.json"
+        
+        steps_info_lines = []
+        for step in running_steps:
+            # Get JSONL path for this session
+            try:
+                with open(SESSIONS_JSON) as f:
+                    sessions_data = json.load(f)
+                session_id = sessions_data.get(step["session_key"], {}).get("sessionId", "")
+                jsonl_path = f"{SESSIONS_DIR}/{session_id}.jsonl" if session_id else "unknown"
+            except Exception:
+                jsonl_path = "unknown"
+            
+            steps_info_lines.append(f"""- Step {step['step_num']}: {step['title']}
+  - Task ID: {step['task_id']}
+  - Session key: {step['session_key']}
+  - JSONL 文件路径: {jsonl_path}""")
+        
+        running_steps_info = "\n".join(steps_info_lines)
+        
+        # Build monitor prompt
+        prompt = f"""你是 Plan Monitor（计划监控器）。
+
+监控的 plan: {plan_id}
+目标: {goal}
+群聊: {chat_id}
+
+当前运行中的 steps:
+{running_steps_info}
+
+你的工作：
+1. 每 5 分钟检查一次所有 running steps 的状态
+2. 检查方法：
+   a. 读 session JSONL 文件最后 50 行：tail -50 {{jsonl_path}}
+   b. 检查文件修改时间：stat -c %Y {{jsonl_path}}
+   c. 查看 plan 状态：luna-os plan show {chat_id}
+3. 用你的智能判断：
+   - 任务在正常推进？（JSONL 有新内容，内容合理）
+   - 卡住了？（5分钟没新内容，或反复重试同一操作）
+   - 出错了？（有 error 但没恢复）
+4. 如果发现异常，通过 webhook 通知群聊：
+   curl -X POST http://localhost:3000/webhook/lark \\
+     -H 'Content-Type: application/json' \\
+     -d '{{"chat_id": "{chat_id}", "text": "⚠️ 监控告警: Step X 可能卡住了..."}}'
+5. 如果所有 steps 都完成（done/failed），退出
+
+开始第一次检查。之后每 5 分钟检查一次（用 sleep 300）。"""
+        
+        # Set Flash model for monitor (cheap)
+        self._set_session_model(session_key, "api-proxy/gemini-3-flash-preview")
+        
+        # Spawn monitor (no reply_chat_id, monitor notifies directly via webhook)
+        monitor_session_key = self.spawn(
+            task_id=f"monitor-{plan_id}",
+            prompt=prompt,
+            session_label=f"monitor-{plan_id}",
+            reply_chat_id="",
+            timeout_minutes=timeout_minutes,
+            model="api-proxy/gemini-3-flash-preview",
+        )
+        
+        logger.info("Monitor spawned: plan=%s session=%s", plan_id, monitor_session_key)
+        return monitor_session_key

@@ -1143,37 +1143,6 @@ Report results to: {chat_id}
 
         self._update_group_title(chat_id)
 
-
-        # Spawn monitor subagent to watch running steps
-        if results and self.agent_runner:
-            # Collect running steps info for monitor
-            running_steps = []
-            for step_num, spawned in results:
-                if spawned:
-                    step = self.store.get_step(plan.id, step_num)
-                    if step and step.task_id:
-                        task = self.store.get_task(step.task_id)
-                        if task and task.session_key:
-                            running_steps.append({
-                                "step_num": step_num,
-                                "task_id": step.task_id,
-                                "session_key": task.session_key,
-                                "title": step.title,
-                                "prompt": step.prompt[:200] if step.prompt else "",
-                            })
-            
-            if running_steps:
-                try:
-                    monitor_key = self.agent_runner.spawn_monitor(
-                        plan_id=plan.id,
-                        goal=plan.goal,
-                        chat_id=chat_id,
-                        running_steps=running_steps,
-                        timeout_minutes=60,
-                    )
-                    logger.info("Spawned monitor: %s", monitor_key)
-                except Exception as exc:
-                    logger.warning("Monitor spawn failed: %s", exc)
         return {
             "started": True,
             "plan_id": plan.id if plan else "",
